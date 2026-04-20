@@ -1,4 +1,6 @@
 /target/
+/cache/
+/node_modules/
 /.idea/compiler.xml
 /.idea/discord.xml
 /.idea/encodings.xml
