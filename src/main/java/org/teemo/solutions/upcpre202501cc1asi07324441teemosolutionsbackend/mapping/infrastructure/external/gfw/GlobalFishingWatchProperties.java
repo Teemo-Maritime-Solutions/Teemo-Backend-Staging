@@ -21,6 +21,7 @@ public class GlobalFishingWatchProperties {
     private String endDate = LocalDate.now().minusDays(4).toString();
     private String spatialResolution = "LOW";
     private String temporalResolution = "ENTIRE";
+    private int responseBufferMb = 64;
     private int maxCellsPerRegion = 18;
     private int nearestNeighbors = 3;
     private int bridgeConnections = 2;
@@ -28,6 +29,10 @@ public class GlobalFishingWatchProperties {
     private int minVesselIds = 2;
     private double maxNeighborDistanceNm = 900.0;
     private double maxBridgeDistanceNm = 650.0;
+    private boolean includePortApproachRegions = true;
+    private double portApproachRegionRadiusDegrees = 3.0;
+    private double portApproachRegionGridDegrees = 8.0;
+    private int maxPortApproachRegions = 96;
     private List<String> vesselTypes = new ArrayList<>(List.of("cargo"));
     private List<RegionProperties> regions = defaultRegions();
 
@@ -111,6 +116,14 @@ public class GlobalFishingWatchProperties {
         return maxCellsPerRegion;
     }
 
+    public int getResponseBufferMb() {
+        return responseBufferMb;
+    }
+
+    public void setResponseBufferMb(int responseBufferMb) {
+        this.responseBufferMb = Math.max(16, responseBufferMb);
+    }
+
     public void setMaxCellsPerRegion(int maxCellsPerRegion) {
         this.maxCellsPerRegion = Math.max(1, maxCellsPerRegion);
     }
@@ -161,6 +174,38 @@ public class GlobalFishingWatchProperties {
 
     public void setMaxBridgeDistanceNm(double maxBridgeDistanceNm) {
         this.maxBridgeDistanceNm = Math.max(1.0, maxBridgeDistanceNm);
+    }
+
+    public boolean isIncludePortApproachRegions() {
+        return includePortApproachRegions;
+    }
+
+    public void setIncludePortApproachRegions(boolean includePortApproachRegions) {
+        this.includePortApproachRegions = includePortApproachRegions;
+    }
+
+    public double getPortApproachRegionRadiusDegrees() {
+        return portApproachRegionRadiusDegrees;
+    }
+
+    public void setPortApproachRegionRadiusDegrees(double portApproachRegionRadiusDegrees) {
+        this.portApproachRegionRadiusDegrees = Math.max(0.5, portApproachRegionRadiusDegrees);
+    }
+
+    public double getPortApproachRegionGridDegrees() {
+        return portApproachRegionGridDegrees;
+    }
+
+    public void setPortApproachRegionGridDegrees(double portApproachRegionGridDegrees) {
+        this.portApproachRegionGridDegrees = Math.max(2.0, portApproachRegionGridDegrees);
+    }
+
+    public int getMaxPortApproachRegions() {
+        return maxPortApproachRegions;
+    }
+
+    public void setMaxPortApproachRegions(int maxPortApproachRegions) {
+        this.maxPortApproachRegions = Math.max(0, maxPortApproachRegions);
     }
 
     public List<String> getVesselTypes() {
@@ -226,6 +271,7 @@ public class GlobalFishingWatchProperties {
                 new RegionProperties("mediterranean-west", "West Mediterranean and Alboran", 33.0, -8.5, 41.5, 10.0),
                 new RegionProperties("iberia-atlantic-approach", "Iberia Atlantic Approach", 31.0, -15.0, 41.5, -5.0),
                 new RegionProperties("iberia-mediterranean-approach", "Iberia Mediterranean Approach", 35.0, -6.0, 41.5, 2.5),
+                new RegionProperties("atlantic-us-east-coast", "US East Coast Approach", 26.0, -82.0, 45.0, -64.0),
                 new RegionProperties("atlantic-north-west", "North Atlantic Western Lanes", 10.0, -85.0, 30.0, -60.0),
                 new RegionProperties("atlantic-north-central-west", "North Atlantic Central Western Lanes", 18.0, -60.0, 38.0, -38.0),
                 new RegionProperties("atlantic-north-central-east", "North Atlantic Central Eastern Lanes", 24.0, -38.0, 44.0, -16.0),

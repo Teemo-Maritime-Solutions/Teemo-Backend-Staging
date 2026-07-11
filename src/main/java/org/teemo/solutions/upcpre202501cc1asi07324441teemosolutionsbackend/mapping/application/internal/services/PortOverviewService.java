@@ -209,20 +209,22 @@ public class PortOverviewService {
             Files.createDirectories(runtimeCacheFile.getParent());
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("lastSyncedAt", lastSyncedAt.toString());
-            root.put("ports", cache.stream().map(snapshot -> Map.ofEntries(
-                    Map.entry("portId", snapshot.portId()),
-                    Map.entry("name", snapshot.name()),
-                    Map.entry("country", snapshot.country()),
-                    Map.entry("lat", snapshot.lat()),
-                    Map.entry("lon", snapshot.lon()),
-                    Map.entry("status", snapshot.status().name()),
-                    Map.entry("reason", snapshot.reason()),
-                    Map.entry("traffic", snapshot.traffic()),
-                    Map.entry("updatedAt", snapshot.updatedAt() != null ? snapshot.updatedAt().toString() : null),
-                    Map.entry("contactPhone", snapshot.contactPhone()),
-                    Map.entry("contactEmail", snapshot.contactEmail()),
-                    Map.entry("website", snapshot.website())
-            )).collect(Collectors.toList()));
+            root.put("ports", cache.stream().map(snapshot -> {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("portId", snapshot.portId());
+                entry.put("name", snapshot.name());
+                entry.put("country", snapshot.country());
+                entry.put("lat", snapshot.lat());
+                entry.put("lon", snapshot.lon());
+                entry.put("status", snapshot.status().name());
+                entry.put("reason", snapshot.reason());
+                entry.put("traffic", snapshot.traffic());
+                entry.put("updatedAt", snapshot.updatedAt() != null ? snapshot.updatedAt().toString() : null);
+                entry.put("contactPhone", snapshot.contactPhone());
+                entry.put("contactEmail", snapshot.contactEmail());
+                entry.put("website", snapshot.website());
+                return entry;
+            }).collect(Collectors.toList()));
             mapper.writerWithDefaultPrettyPrinter().writeValue(runtimeCacheFile.toFile(), root);
         } catch (IOException e) {
             log.warn("Unable to persist port overview runtime cache", e);

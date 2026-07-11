@@ -6,9 +6,13 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeLandMask;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.external.gfw.GlobalFishingWatchClient;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.external.gfw.GlobalFishingWatchProperties;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.documents.PortDocument;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.PortRepository;
 
 import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -18,10 +22,9 @@ import static org.mockito.Mockito.when;
 class GlobalFishingWatchCorridorOverlayProviderTest {
 
     @Test
-    void shouldBuildOverlayFromPresenceCells() {
+    void shouldBuildOverlayFromPresenceCellsUsingOnlyAisNodes() {
         GlobalFishingWatchClient client = mock(GlobalFishingWatchClient.class);
         GlobalFishingWatchProperties properties = configuredProperties();
-        MaritimeNetworkCatalog catalog = new MaritimeNetworkCatalog();
 
         GlobalFishingWatchProperties.RegionProperties region = properties.getRegions().get(0);
         when(client.fetchPresenceCells(region)).thenReturn(List.of(
@@ -30,37 +33,24 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
                 new GlobalFishingWatchClient.PresenceCell(16.40, -70.10, 310.0, 5)
         ));
 
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                catalog,
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
+        GlobalFishingWatchCorridorOverlayProvider provider = provider(client, properties, new MaritimeLandMask(new GeoUtils()));
 
         MaritimeCorridorOverlay overlay = provider.refreshOverlay();
 
         assertThat(overlay.source()).isEqualTo("GLOBAL_FISHING_WATCH");
         assertThat(overlay.nodes()).hasSize(3);
+        assertThat(overlay.nodes()).allMatch(node -> node.getId().startsWith("GFW:"));
         assertThat(overlay.edges()).isNotEmpty();
-        assertThat(overlay.edges()).anyMatch(edge -> edge.fromNodeId().startsWith("GFW:") && edge.toNodeId().startsWith("GFW:"));
-        assertThat(overlay.edges()).anyMatch(edge -> edge.fromNodeId().startsWith("GFW:") && !edge.toNodeId().startsWith("GFW:")
-                || !edge.fromNodeId().startsWith("GFW:") && edge.toNodeId().startsWith("GFW:"));
+        assertThat(overlay.edges()).allMatch(edge ->
+                edge.fromNodeId().startsWith("GFW:") && edge.toNodeId().startsWith("GFW:"));
     }
 
     @Test
     void currentOverlayShouldReturnCachedOverlayWithoutTriggeringRefresh() {
         GlobalFishingWatchClient client = mock(GlobalFishingWatchClient.class);
         GlobalFishingWatchProperties properties = configuredProperties();
-        MaritimeNetworkCatalog catalog = new MaritimeNetworkCatalog();
 
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                catalog,
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
+        GlobalFishingWatchCorridorOverlayProvider provider = provider(client, properties, new MaritimeLandMask(new GeoUtils()));
 
         MaritimeCorridorOverlay current = provider.currentOverlay();
 
@@ -75,13 +65,7 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
         GlobalFishingWatchProperties properties = new GlobalFishingWatchProperties();
         properties.setEnabled(false);
 
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
+        GlobalFishingWatchCorridorOverlayProvider provider = provider(client, properties, new MaritimeLandMask(new GeoUtils()));
 
         MaritimeCorridorOverlay overlay = provider.refreshOverlay();
 
@@ -111,94 +95,13 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
                 new GlobalFishingWatchClient.PresenceCell(10.5, 10.5, 310.0, 5)
         ));
 
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
+        GlobalFishingWatchCorridorOverlayProvider provider = provider(client, properties, new MaritimeLandMask(new GeoUtils()));
 
         MaritimeCorridorOverlay overlay = provider.refreshOverlay();
 
         assertThat(overlay.edges())
                 .noneMatch(edge -> edge.fromNodeId().contains(":1_00:1_00") && edge.toNodeId().contains(":10_50:10_50")
                         || edge.fromNodeId().contains(":10_50:10_50") && edge.toNodeId().contains(":1_00:1_00"));
-    }
-
-    @Test
-    void shouldNotBridgeAtlanticRegionDirectlyToPanamaPacific() {
-        GlobalFishingWatchClient client = mock(GlobalFishingWatchClient.class);
-        GlobalFishingWatchProperties properties = configuredProperties();
-        properties.setRegions(List.of(new GlobalFishingWatchProperties.RegionProperties(
-                "atlantic-north-west",
-                "North Atlantic Western Lanes",
-                10.0,
-                -85.0,
-                30.0,
-                -60.0
-        )));
-        properties.setBridgeConnections(5);
-        properties.setMaxBridgeDistanceNm(900.0);
-
-        GlobalFishingWatchProperties.RegionProperties region = properties.getRegions().get(0);
-        when(client.fetchPresenceCells(region)).thenReturn(List.of(
-                new GlobalFishingWatchClient.PresenceCell(12.3, -72.0, 420.0, 9),
-                new GlobalFishingWatchClient.PresenceCell(12.5, -70.0, 360.0, 7),
-                new GlobalFishingWatchClient.PresenceCell(14.6, -61.1, 310.0, 5)
-        ));
-
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
-
-        MaritimeCorridorOverlay overlay = provider.refreshOverlay();
-
-        assertThat(overlay.edges())
-                .noneMatch(edge -> edge.fromNodeId().equals("PANAMA_PACIFIC") || edge.toNodeId().equals("PANAMA_PACIFIC"));
-    }
-
-    @Test
-    void shouldNotBridgeCaribbeanPanamaRegionToInternalCanalNodes() {
-        GlobalFishingWatchClient client = mock(GlobalFishingWatchClient.class);
-        GlobalFishingWatchProperties properties = configuredProperties();
-        properties.setRegions(List.of(new GlobalFishingWatchProperties.RegionProperties(
-                "caribbean-panama-west",
-                "Panama and Western Caribbean",
-                7.0,
-                -81.5,
-                14.0,
-                -75.0
-        )));
-        properties.setBridgeConnections(5);
-        properties.setMaxBridgeDistanceNm(900.0);
-
-        GlobalFishingWatchProperties.RegionProperties region = properties.getRegions().get(0);
-        when(client.fetchPresenceCells(region)).thenReturn(List.of(
-                new GlobalFishingWatchClient.PresenceCell(8.5, -77.0, 420.0, 9),
-                new GlobalFishingWatchClient.PresenceCell(9.1, -79.6, 360.0, 7),
-                new GlobalFishingWatchClient.PresenceCell(10.4, -75.5, 310.0, 5)
-        ));
-
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
-
-        MaritimeCorridorOverlay overlay = provider.refreshOverlay();
-
-        assertThat(overlay.edges())
-                .noneMatch(edge -> edge.fromNodeId().equals("PANAMA_CANAL")
-                        || edge.toNodeId().equals("PANAMA_CANAL")
-                        || edge.fromNodeId().equals("PANAMA_GAILLARD_CUT_SOUTH")
-                        || edge.toNodeId().equals("PANAMA_GAILLARD_CUT_SOUTH"));
     }
 
     @Test
@@ -223,23 +126,19 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
                 new GlobalFishingWatchClient.PresenceCell(9.20, -79.85, 360.0, 7)
         ));
 
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()) {
-                    @Override
-                    public boolean isOnLand(Coordinates coordinates) {
-                        return false;
-                    }
+        MaritimeLandMask landMask = new MaritimeLandMask(new GeoUtils()) {
+            @Override
+            public boolean isOnLand(Coordinates coordinates) {
+                return false;
+            }
 
-                    @Override
-                    public boolean crossesLand(Coordinates start, Coordinates end) {
-                        return true;
-                    }
-                }
-        );
+            @Override
+            public boolean crossesLand(Coordinates start, Coordinates end) {
+                return true;
+            }
+        };
+
+        GlobalFishingWatchCorridorOverlayProvider provider = provider(client, properties, landMask);
 
         MaritimeCorridorOverlay overlay = provider.refreshOverlay();
 
@@ -287,13 +186,7 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
                 new GlobalFishingWatchClient.PresenceCell(12.3, -77.1, 310.0, 5)
         ));
 
-        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
-                client,
-                properties,
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils())
-        );
+        GlobalFishingWatchCorridorOverlayProvider provider = provider(client, properties, new MaritimeLandMask(new GeoUtils()));
 
         MaritimeCorridorOverlay overlay = provider.refreshOverlay();
 
@@ -302,6 +195,60 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
                         && edge.toNodeId().startsWith("GFW:caribbean-panama-west:")
                         || edge.fromNodeId().startsWith("GFW:caribbean-panama-west:")
                         && edge.toNodeId().startsWith("GFW:peru-ecuador-coast:"));
+    }
+
+    @Test
+    void shouldGeneratePortApproachRegionsFromBackendPorts() {
+        GlobalFishingWatchClient client = mock(GlobalFishingWatchClient.class);
+        GlobalFishingWatchProperties properties = configuredProperties();
+        properties.setRegions(List.of(new GlobalFishingWatchProperties.RegionProperties(
+                "west-africa-baseline",
+                "West Africa Baseline",
+                0.0,
+                -30.0,
+                20.0,
+                -5.0
+        )));
+        properties.setPortApproachRegionGridDegrees(8.0);
+        properties.setPortApproachRegionRadiusDegrees(3.0);
+        PortRepository portRepository = mock(PortRepository.class);
+        when(portRepository.findAll()).thenReturn(List.of(
+                port("Dakar", 14.7167, -17.4677),
+                port("Nuakchot", 18.0731, -15.9582)
+        ));
+        when(client.fetchPresenceCells(argThat(region -> region.getId().startsWith("port-approach-"))))
+                .thenReturn(List.of(
+                        new GlobalFishingWatchClient.PresenceCell(14.2, -17.8, 300.0, 4),
+                        new GlobalFishingWatchClient.PresenceCell(16.0, -17.0, 260.0, 3)
+                ));
+
+        GlobalFishingWatchCorridorOverlayProvider provider = new GlobalFishingWatchCorridorOverlayProvider(
+                client,
+                properties,
+                new MaritimeNetworkCatalog(),
+                new GeoUtils(),
+                new MaritimeLandMask(new GeoUtils()),
+                null,
+                portRepository
+        );
+
+        MaritimeCorridorOverlay overlay = provider.refreshOverlay();
+
+        assertThat(overlay.nodes())
+                .anyMatch(node -> node.getId().startsWith("GFW:port-approach-"));
+        verify(client).fetchPresenceCells(argThat(region -> region.getId().startsWith("port-approach-")));
+    }
+
+    private GlobalFishingWatchCorridorOverlayProvider provider(GlobalFishingWatchClient client,
+                                                               GlobalFishingWatchProperties properties,
+                                                               MaritimeLandMask landMask) {
+        return new GlobalFishingWatchCorridorOverlayProvider(
+                client,
+                properties,
+                new MaritimeNetworkCatalog(),
+                new GeoUtils(),
+                landMask
+        );
     }
 
     private GlobalFishingWatchProperties configuredProperties() {
@@ -324,5 +271,13 @@ class GlobalFishingWatchCorridorOverlayProviderTest {
         properties.setMinHours(100.0);
         properties.setMinVesselIds(2);
         return properties;
+    }
+
+    private PortDocument port(String name, double latitude, double longitude) {
+        return new PortDocument(
+                name,
+                new PortDocument.CoordinatesDocument(latitude, longitude),
+                "Africa"
+        );
     }
 }

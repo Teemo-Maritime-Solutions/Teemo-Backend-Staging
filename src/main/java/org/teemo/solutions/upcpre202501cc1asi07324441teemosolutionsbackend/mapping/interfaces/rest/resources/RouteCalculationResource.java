@@ -7,5 +7,6 @@ public record RouteCalculationResource(
         List<String> optimalRoute,
         double totalDistance,
         List<String> warnings,
-        Map<String, CoordinatesResource> coordinatesMapping
+        Map<String, CoordinatesResource> coordinatesMapping,
+        RouteMetadataResource metadata
 ) {}

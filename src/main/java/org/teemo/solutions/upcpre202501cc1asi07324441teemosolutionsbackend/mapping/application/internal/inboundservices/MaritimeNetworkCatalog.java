@@ -435,7 +435,13 @@ public class MaritimeNetworkCatalog {
                 edge("AZORES_SOUTH", "MADEIRA_APPROACH"),
                 edge("MADEIRA_APPROACH", "PORTUGAL_APPROACH"),
                 edge("PORTUGAL_APPROACH", "IBERIA_WEST"),
-                edge("AZORES_CORRIDOR", "PORTUGAL_APPROACH"),
+                edge("AZORES_CORRIDOR", "PORTUGAL_APPROACH", List.of(
+                        coord(38.0, -28.0),
+                        coord(37.2, -23.0),
+                        coord(36.1, -18.5),
+                        coord(35.7, -14.5),
+                        coord(37.0, -11.5)
+                ), false, false, false),
                 edge("AZORES_CORRIDOR", "IBERIA_WEST"),
 
                 edge("ATLANTIC_EQUATOR_WEST", "BRAZIL_NORTH"),
@@ -517,7 +523,7 @@ public class MaritimeNetworkCatalog {
             case "callao":
             case "chancay":
             case "guayaquil":
-                return List.of("PACIFIC_SOUTH_EAST");
+                return List.of("PERU_APPROACH", "PACIFIC_SOUTH_EAST");
             case "san antonio":
             case "valparaiso":
             case "valparaiso ":
@@ -695,12 +701,21 @@ public class MaritimeNetworkCatalog {
             case "tanger med":
             case "casablanca":
                 return List.of("iberia-atlantic-approach");
+            case "new york":
+            case "norfolk":
+            case "savannah":
+            case "fort lauderdale":
+            case "montreal":
+                return List.of("atlantic-us-east-coast", "atlantic-north-west", "caribbean-panama-east");
             default:
                 break;
         }
 
         if (continent.contains("america") && lon <= -76 && lat >= -15 && lat <= 8) {
             return List.of("peru-ecuador-coast");
+        }
+        if (continent.contains("america") && lat >= 20 && lon > -90) {
+            return List.of("atlantic-us-east-coast", "atlantic-north-west", "caribbean-panama-east");
         }
         if ((continent.contains("europa") || continent.contains("europe")) && lon >= -5.5 && lon <= 2.5 && lat >= 35 && lat <= 41.5) {
             return List.of("iberia-mediterranean-approach");

@@ -2,6 +2,7 @@ package org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.iam.
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -9,6 +10,7 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.iam.d
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.iam.domain.services.RoleCommandService;
 
 @Component
+@ConditionalOnProperty(name = "app.seed.roles.enabled", havingValue = "true", matchIfMissing = true)
 public class ApplicationReadyEventHandler {
 
     private final RoleCommandService roleCommandService;

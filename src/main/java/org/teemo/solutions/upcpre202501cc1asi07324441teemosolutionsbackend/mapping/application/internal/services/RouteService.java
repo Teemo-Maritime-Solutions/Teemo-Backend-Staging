@@ -13,6 +13,7 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.GeoUtils;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.RouteHistorySource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.RouteHistoryStatus;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.RoutePath;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.services.RouteCalculatorService;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.services.SafetyValidator;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.mappers.PortMapper;
@@ -21,7 +22,9 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.PortRepository;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.RouteRepository;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.CoordinatesResource;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.MaritimeWaypointResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteCalculationResource;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteMetadataResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteRecalculationResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.application.internal.services.RouteHistoryContext;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.application.internal.services.RouteHistoryPersistRequest;
@@ -32,9 +35,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -51,6 +58,7 @@ public class RouteService {
     private final PortMapper portMapper;
     private final RouteHistoryService routeHistoryService;
     private final RoutePopularityService routePopularityService;
+    private final ConcurrentHashMap<String, CompletableFuture<RouteCalculationResource>> inFlightCalculations = new ConcurrentHashMap<>();
 
     public void saveAllRoutes(List<RouteDocument> routes) { routeRepository.saveAll(routes); }
     public boolean existsByHomePortAndDestinationPort(String h, String d) { return routeRepository.existsByHomePortAndDestinationPort(h, d); }
@@ -58,22 +66,107 @@ public class RouteService {
     public List<RouteDocument> findAllRoutes() { return routeRepository.findAll(); }
 
     public RouteCalculationResource calculateOptimalRoute(String startPortId, String endPortId) {
-        return calculateOptimalRoute(startPortId, endPortId, Collections.emptySet(), null);
+        return calculateOptimalRoute(startPortId, endPortId, List.of(), false, Collections.emptySet(), null);
     }
 
     public RouteCalculationResource calculateOptimalRoute(String startPortId, String endPortId, RouteHistoryContext historyContext) {
-        return calculateOptimalRoute(startPortId, endPortId, Collections.emptySet(), historyContext);
+        return calculateOptimalRoute(startPortId, endPortId, List.of(), false, Collections.emptySet(), historyContext);
     }
 
     public RouteCalculationResource calculateOptimalRoute(String startPortId, String endPortId, Set<String> avoidPortIds) {
-        return calculateOptimalRoute(startPortId, endPortId, avoidPortIds, null);
+        return calculateOptimalRoute(startPortId, endPortId, List.of(), false, avoidPortIds, null);
     }
 
     public RouteCalculationResource calculateOptimalRoute(String startPortId, String endPortId, Set<String> avoidPortIds,
                                                           RouteHistoryContext historyContext) {
+        return calculateOptimalRoute(startPortId, endPortId, List.of(), false, avoidPortIds, historyContext);
+    }
+
+    public RouteCalculationResource calculateOptimalRoute(String startPortId,
+                                                          String endPortId,
+                                                          List<String> requestedViaPortIds,
+                                                          boolean enforceMandatoryViaPorts,
+                                                          Set<String> avoidPortIds,
+                                                          RouteHistoryContext historyContext) {
+        if (historyContext == null) {
+            return deduplicatedCalculation(startPortId, endPortId, requestedViaPortIds, enforceMandatoryViaPorts, avoidPortIds);
+        }
+
+        return calculateOptimalRouteInternal(
+                startPortId,
+                endPortId,
+                requestedViaPortIds,
+                enforceMandatoryViaPorts,
+                avoidPortIds,
+                historyContext
+        );
+    }
+
+    private RouteCalculationResource deduplicatedCalculation(String startPortId,
+                                                             String endPortId,
+                                                             List<String> requestedViaPortIds,
+                                                             boolean enforceMandatoryViaPorts,
+                                                             Set<String> avoidPortIds) {
+        String key = buildCalculationKey(startPortId, endPortId, requestedViaPortIds, enforceMandatoryViaPorts, avoidPortIds);
+        CompletableFuture<RouteCalculationResource> future = inFlightCalculations.computeIfAbsent(key, ignored ->
+                CompletableFuture.supplyAsync(() -> calculateOptimalRouteInternal(
+                        startPortId,
+                        endPortId,
+                        requestedViaPortIds,
+                        enforceMandatoryViaPorts,
+                        avoidPortIds,
+                        null
+                ))
+        );
+        try {
+            return future.join();
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw exception;
+        } finally {
+            inFlightCalculations.remove(key, future);
+        }
+    }
+
+    private String buildCalculationKey(String startPortId,
+                                       String endPortId,
+                                       List<String> requestedViaPortIds,
+                                       boolean enforceMandatoryViaPorts,
+                                       Set<String> avoidPortIds) {
+        String viaKey = requestedViaPortIds == null ? "" : String.join(",", requestedViaPortIds);
+        String avoidKey = avoidPortIds.stream().sorted().collect(Collectors.joining(","));
+        return startPortId + "|" + endPortId + "|" + viaKey + "|" + enforceMandatoryViaPorts + "|" + avoidKey;
+    }
+
+    private RouteCalculationResource calculateOptimalRouteInternal(String startPortId,
+                                                                   String endPortId,
+                                                                   List<String> requestedViaPortIds,
+                                                                   boolean enforceMandatoryViaPorts,
+                                                                   Set<String> avoidPortIds,
+                                                                   RouteHistoryContext historyContext) {
         Port startPort = findPortByIdOrThrow(startPortId);
         Port endPort = findPortByIdOrThrow(endPortId);
-        RouteComputationResult result = computeRoute(startPort, endPort, avoidPortIds, false);
+
+        RouteComputationResult result;
+        if (requestedViaPortIds == null || requestedViaPortIds.isEmpty()) {
+            result = computeRoute(startPort, endPort, avoidPortIds, false, List.of(), List.of(), List.of());
+        } else if (enforceMandatoryViaPorts) {
+            result = computeRouteThroughMandatoryPorts(startPort, endPort, requestedViaPortIds, avoidPortIds, historyContext);
+        } else {
+            result = computeRoute(
+                    startPort,
+                    endPort,
+                    avoidPortIds,
+                    false,
+                    requestedViaPortIds,
+                    List.of(),
+                    List.of("Se ignoraron puertos intermedios porque no se solicitaron como obligatorios.")
+            );
+        }
+
         recordRouteSearch(startPort, endPort);
         persistSuccessfulHistory(historyContext, startPort, endPort, result, historyContext != null ? historyContext.routeId() : null);
         return result.response();
@@ -90,9 +183,9 @@ public class RouteService {
         Port startPort = findPortByNameAndContinentOrThrow(routeDocument.getHomePort(), routeDocument.getHomePortContinent());
         Port endPort = findPortByNameAndContinentOrThrow(routeDocument.getDestinationPort(), routeDocument.getDestinationPortContinent());
 
-        RouteComputationResult current = computeRoute(startPort, endPort, Collections.emptySet(), true);
+        RouteComputationResult current = computeRoute(startPort, endPort, Collections.emptySet(), true, List.of(), List.of(), List.of());
 
-        List<String> disabledPortIds = current.ports().stream()
+        List<String> disabledPortIds = current.path().principalPorts().stream()
                 .filter(Port::isDisabled)
                 .map(Port::getId)
                 .filter(Objects::nonNull)
@@ -101,7 +194,13 @@ public class RouteService {
 
         if (disabledPortIds.isEmpty()) {
             persistSuccessfulHistory(historyContext, startPort, endPort, current, routeId);
-            return new RouteRecalculationResource(routeId, current.response().optimalRoute(), false, List.of());
+            return new RouteRecalculationResource(
+                    routeId,
+                    current.response().optimalRoute(),
+                    false,
+                    List.of(),
+                    current.response().metadata()
+            );
         }
 
         Set<String> avoidPortIds = new HashSet<>(disabledPortIds);
@@ -116,13 +215,14 @@ public class RouteService {
         logger.info("route.recalculate routeId={} avoidedPortCount={}", routeId, avoidPortIds.size());
 
         try {
-            RouteComputationResult recalculated = computeRoute(startPort, endPort, avoidPortIds, false);
+            RouteComputationResult recalculated = computeRoute(startPort, endPort, avoidPortIds, false, List.of(), List.of(), List.of());
             persistSuccessfulHistory(historyContext, startPort, endPort, recalculated, routeId);
             return new RouteRecalculationResource(
                     routeId,
                     recalculated.response().optimalRoute(),
                     true,
-                    new ArrayList<>(avoidPortIds)
+                    new ArrayList<>(avoidPortIds),
+                    recalculated.response().metadata()
             );
         } catch (RouteNotFoundException ex) {
             persistNoViableHistory(historyContext, startPort, endPort, avoidPortIds, routeId, ex.getMessage());
@@ -161,7 +261,7 @@ public class RouteService {
             return;
         }
         RouteCalculationResource response = computationResult.response();
-        List<String> waypointIds = extractWaypointPortIds(computationResult.ports());
+        List<String> waypointIds = extractWaypointPortIds(computationResult.path());
         List<String> avoidedIds = toSortedList(computationResult.effectiveAvoidPortIds());
         RouteHistoryPersistRequest request = RouteHistoryPersistRequest.builder()
                 .userId(context.userId())
@@ -182,7 +282,7 @@ public class RouteService {
                 .engineVersion(context.engineVersion())
                 .pathEncoding(context.pathEncoding())
                 .geojson(context.geojson())
-                .metadata(buildMetadata(context, computationResult.ports().size(), avoidedIds.size()))
+                .metadata(buildMetadata(context, computationResult.path().principalPorts().size(), avoidedIds.size()))
                 .build();
         routeHistoryService.save(request);
     }
@@ -222,7 +322,8 @@ public class RouteService {
         return context != null && context.userId() != null;
     }
 
-    private List<String> extractWaypointPortIds(List<Port> ports) {
+    private List<String> extractWaypointPortIds(RoutePath path) {
+        List<Port> ports = path.principalPorts();
         if (ports.size() <= 2) {
             return List.of();
         }
@@ -271,7 +372,52 @@ public class RouteService {
                 ));
     }
 
-    private RouteComputationResult computeRoute(Port startPort, Port endPort, Set<String> avoidPortIds, boolean includeDisabledPorts) {
+    private RouteMetadataResource createRouteMetadata(RoutePath path,
+                                                      List<String> requestedViaPortIds,
+                                                      List<String> appliedViaPortIds) {
+        if (path == null || path.principalPorts().isEmpty()) {
+            return RouteMetadataResource.empty();
+        }
+
+        List<String> portIds = path.principalPorts().stream()
+                .map(Port::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        List<MaritimeWaypointResource> waypoints = path.orderedWaypoints().stream()
+                .filter(node -> node.getCoordinates() != null)
+                .map(node -> new MaritimeWaypointResource(
+                        node.getId(),
+                        node.getName(),
+                        node.getCoordinates().latitude(),
+                        node.getCoordinates().longitude(),
+                        node.getType().name()
+                ))
+                .toList();
+
+        List<List<Double>> geometry = path.geometry().stream()
+                .map(point -> List.of(point.longitude(), point.latitude()))
+                .toList();
+
+        return new RouteMetadataResource(
+                portIds,
+                List.copyOf(requestedViaPortIds),
+                List.copyOf(appliedViaPortIds),
+                waypoints,
+                geometry,
+                path.estimatedHours(),
+                "A_STAR",
+                "AIS_OVERLAY"
+        );
+    }
+
+    private RouteComputationResult computeRoute(Port startPort,
+                                                Port endPort,
+                                                Set<String> avoidPortIds,
+                                                boolean includeDisabledPorts,
+                                                List<String> requestedViaPortIds,
+                                                List<String> appliedViaPortIds,
+                                                List<String> extraWarnings) {
         Set<String> disabledPortIds = loadDisabledPortIds();
         validateEndpointsAvailability(startPort, endPort, disabledPortIds);
 
@@ -280,16 +426,132 @@ public class RouteService {
             effectiveAvoidPortIds.addAll(disabledPortIds);
         }
 
-        List<Port> optimalRoute = routeCalculatorService.calculateOptimalRoute(startPort, endPort, effectiveAvoidPortIds);
-        double totalDistance = calculateTotalDistance(optimalRoute);
-        List<String> warnings = safetyValidator.validateFullRoute(optimalRoute);
+        RoutePath routePath = routeCalculatorService.calculateOptimalRoute(startPort, endPort, effectiveAvoidPortIds);
+        List<String> warnings = new ArrayList<>(routePath.warnings());
+        warnings.addAll(safetyValidator.validateFullRoute(routePath.principalPorts()));
+        warnings.addAll(extraWarnings);
         RouteCalculationResource response = new RouteCalculationResource(
-                optimalRoute.stream().map(Port::getName).toList(),
-                totalDistance,
-                warnings,
-                createCoordinatesMapping(optimalRoute)
+                routePath.principalPorts().stream().map(Port::getName).toList(),
+                routePath.totalDistanceNm(),
+                List.copyOf(warnings),
+                createCoordinatesMapping(routePath.principalPorts()),
+                createRouteMetadata(routePath, requestedViaPortIds, appliedViaPortIds)
         );
-        return new RouteComputationResult(optimalRoute, response, Collections.unmodifiableSet(effectiveAvoidPortIds));
+        return new RouteComputationResult(routePath, response, Collections.unmodifiableSet(effectiveAvoidPortIds));
+    }
+
+    private RouteComputationResult computeRouteThroughMandatoryPorts(Port startPort,
+                                                                     Port endPort,
+                                                                     List<String> requestedViaPortIds,
+                                                                     Set<String> avoidPortIds,
+                                                                     RouteHistoryContext historyContext) {
+        List<Port> viaPorts = requestedViaPortIds.stream()
+                .map(this::findPortByIdOrThrow)
+                .toList();
+
+        if (viaPorts.stream().map(Port::getId).anyMatch(avoidPortIds::contains)) {
+            throw new RouteNotFoundException("No se puede calcular la ruta: un puerto intermedio obligatorio esta bloqueado.");
+        }
+
+        List<Port> sequence = new ArrayList<>();
+        sequence.add(startPort);
+        sequence.addAll(viaPorts);
+        sequence.add(endPort);
+
+        List<RoutePath> segments = new ArrayList<>();
+        Set<String> effectiveAvoidedIds = new HashSet<>(avoidPortIds);
+        for (int index = 0; index < sequence.size() - 1; index++) {
+            Port from = sequence.get(index);
+            Port to = sequence.get(index + 1);
+            segments.add(routeCalculatorService.calculateOptimalRoute(from, to, effectiveAvoidedIds));
+        }
+
+        RoutePath mergedPath = mergeSegments(segments);
+        List<String> appliedViaPortIds = viaPorts.stream()
+                .map(Port::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        List<String> warnings = List.of("La ruta incluye puertos intermedios obligatorios.");
+        RouteCalculationResource response = new RouteCalculationResource(
+                mergedPath.principalPorts().stream().map(Port::getName).toList(),
+                mergedPath.totalDistanceNm(),
+                mergeWarnings(mergedPath, warnings),
+                createCoordinatesMapping(mergedPath.principalPorts()),
+                createRouteMetadata(mergedPath, requestedViaPortIds, appliedViaPortIds)
+        );
+        return new RouteComputationResult(mergedPath, response, Collections.unmodifiableSet(effectiveAvoidedIds));
+    }
+
+    private RoutePath mergeSegments(List<RoutePath> segments) {
+        List<org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeNode> orderedNodes = new ArrayList<>();
+        List<Port> principalPorts = new ArrayList<>();
+        List<org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeNode> orderedWaypoints = new ArrayList<>();
+        List<org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates> geometry = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        double totalDistanceNm = 0.0;
+        double estimatedHours = 0.0;
+
+        for (int index = 0; index < segments.size(); index++) {
+            RoutePath segment = segments.get(index);
+            appendDistinct(orderedNodes, segment.orderedNodes(), index > 0);
+            appendDistinctPorts(principalPorts, segment.principalPorts());
+            orderedWaypoints.addAll(segment.orderedWaypoints());
+            appendDistinctCoordinates(geometry, segment.geometry());
+            warnings.addAll(segment.warnings());
+            totalDistanceNm += segment.totalDistanceNm();
+            estimatedHours += segment.estimatedHours();
+        }
+
+        return new RoutePath(
+                List.copyOf(orderedNodes),
+                List.copyOf(principalPorts),
+                List.copyOf(orderedWaypoints),
+                List.copyOf(geometry),
+                totalDistanceNm,
+                estimatedHours,
+                List.copyOf(warnings)
+        );
+    }
+
+    private List<String> mergeWarnings(RoutePath path, List<String> extraWarnings) {
+        ArrayList<String> warnings = new ArrayList<>(path.warnings());
+        warnings.addAll(safetyValidator.validateFullRoute(path.principalPorts()));
+        warnings.addAll(extraWarnings);
+        return List.copyOf(warnings);
+    }
+
+    private <T> void appendDistinct(List<T> target, List<T> values, boolean skipFirstValue) {
+        for (int index = 0; index < values.size(); index++) {
+            if (skipFirstValue && index == 0) {
+                continue;
+            }
+            T value = values.get(index);
+            if (target.isEmpty() || !target.get(target.size() - 1).equals(value)) {
+                target.add(value);
+            }
+        }
+    }
+
+    private void appendDistinctPorts(List<Port> target, List<Port> values) {
+        LinkedHashMap<String, Port> portsById = new LinkedHashMap<>();
+        for (Port port : target) {
+            portsById.put(port.getId() != null ? port.getId() : port.getName() + ":" + port.getContinent(), port);
+        }
+        for (Port port : values) {
+            portsById.putIfAbsent(port.getId() != null ? port.getId() : port.getName() + ":" + port.getContinent(), port);
+        }
+        target.clear();
+        target.addAll(portsById.values());
+    }
+
+    private void appendDistinctCoordinates(List<org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates> target,
+                                           List<org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates> values) {
+        for (org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates value : values) {
+            if (target.isEmpty() || !target.get(target.size() - 1).equals(value)) {
+                target.add(value);
+            }
+        }
     }
 
     private Set<String> loadDisabledPortIds() {
@@ -321,5 +583,5 @@ public class RouteService {
                     ex.getMessage());
         }
     }
-    private record RouteComputationResult(List<Port> ports, RouteCalculationResource response, Set<String> effectiveAvoidPortIds) {}
+    private record RouteComputationResult(RoutePath path, RouteCalculationResource response, Set<String> effectiveAvoidPortIds) {}
 }

@@ -2,6 +2,7 @@ package org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapp
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.GeoUtils;
@@ -10,19 +11,23 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeNodeType;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.external.gfw.GlobalFishingWatchClient;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.external.gfw.GlobalFishingWatchProperties;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.documents.PortDocument;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.documents.GlobalFishingWatchOverlayDocument;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.GlobalFishingWatchOverlayRepository;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.PortRepository;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
+import java.util.HexFormat;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -31,9 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorridorOverlayProvider {
 
     private static final Logger logger = LoggerFactory.getLogger(GlobalFishingWatchCorridorOverlayProvider.class);
-    private static final Duration OVERLAY_REFRESH_TTL = Duration.ofHours(6);
     private static final int MAX_CELLS_PER_BUCKET = 3;
-    private static final int CROSS_REGION_CONNECTIONS = 3;
     private static final double MIN_BUCKET_DEGREES = 1.5;
     private static final double MAX_BUCKET_DEGREES = 7.0;
     private static final double CROSS_REGION_DISTANCE_FACTOR = 1.35;
@@ -41,71 +44,65 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
     private static final double SAME_REGION_SUPPORT_RADIUS_NM = 115.0;
     private static final double CROSS_REGION_SUPPORT_SPACING_NM = 170.0;
     private static final double CROSS_REGION_SUPPORT_RADIUS_NM = 140.0;
-    private static final double BRIDGE_SUPPORT_RADIUS_NM = 125.0;
     private static final int PRIMARY_BUCKET_NEIGHBOR_RANGE = 1;
     private static final int SECONDARY_BUCKET_NEIGHBOR_RANGE = 2;
-    private static final Set<String> PACIFIC_STATIC_NODES = Set.of(
-            "CALIFORNIA_OFFSHORE", "BAJA_OFFSHORE", "PACIFIC_NORTHEAST", "PACIFIC_TROPICAL_EAST",
-            "PACIFIC_SOUTH_EAST", "SOUTH_PACIFIC_EAST", "SOUTH_PACIFIC_CENTRAL", "SOUTH_PACIFIC_WEST",
-            "CENTRAL_AMERICA_WEST", "ECUADOR_APPROACH", "ECUADOR_OUTER", "PERU_NORTHBOUND",
-            "PERU_APPROACH", "CHILE_APPROACH", "PANAMA_PACIFIC_OUTER", "PANAMA_PACIFIC", "CAPE_HORN_WEST"
-    );
-    private static final Set<String> ATLANTIC_STATIC_NODES = Set.of(
-            "PANAMA_ATLANTIC", "PANAMA_CARIBBEAN_OUTER", "CARIBBEAN_SW", "CARIBBEAN_WEST",
-            "CARIBBEAN_COLOMBIA", "CARIBBEAN", "CARIBBEAN_ARC", "CARIBBEAN_EAST", "LESSER_ANTILLES_OUTER",
-            "FLORIDA_STRAITS", "US_EAST_COAST", "ATLANTIC_TRANSITION_WEST", "ATLANTIC_TRANSITION_CENTRAL",
-            "NORTH_ATLANTIC_WEST", "NORTH_ATLANTIC_CENTRAL", "NORTH_ATLANTIC_EAST", "AZORES_CORRIDOR",
-            "AZORES_SOUTH", "MADEIRA_APPROACH", "PORTUGAL_APPROACH", "IBERIA_WEST", "ATLANTIC_EQUATOR_WEST",
-            "ATLANTIC_EQUATOR_EAST", "BRAZIL_NORTH", "BRAZIL_SOUTHEAST", "SOUTH_ATLANTIC_WEST",
-            "RIO_PLATA_APPROACH", "CAPE_HORN_EAST", "WEST_AFRICA_NW", "WEST_AFRICA_CENTRAL",
-            "WEST_AFRICA_SOUTH", "SOUTH_ATLANTIC_EAST", "SOUTH_AFRICA_WEST", "GIBRALTAR_WEST"
-    );
-    private static final Set<String> MEDITERRANEAN_STATIC_NODES = Set.of(
-            "ALBORAN_SEA", "WEST_MEDITERRANEAN", "TYRRHENIAN_SEA", "CENTRAL_MEDITERRANEAN",
-            "IONIAN_SEA", "AEGEAN_SEA", "EAST_MEDITERRANEAN", "SUEZ_NORTH", "BOSPHORUS_STRAIT",
-            "BLACK_SEA_WEST", "BLACK_SEA"
-    );
-    private static final Set<String> RED_SEA_STATIC_NODES = Set.of(
-            "SUEZ_SOUTH", "RED_SEA_NORTH", "RED_SEA_CENTRAL", "RED_SEA_SOUTH", "GULF_OF_ADEN"
-    );
-    private static final Set<String> INDIAN_STATIC_NODES = Set.of(
-            "GULF_OF_OMAN", "ARABIAN_SEA", "SRI_LANKA_SOUTH", "BAY_OF_BENGAL_WEST", "BAY_OF_BENGAL",
-            "BAY_OF_BENGAL_EAST", "INDIAN_OCEAN_CENTRAL", "INDIAN_OCEAN_EAST", "SOUTH_INDIAN_EAST",
-            "MADAGASCAR_EAST", "MOZAMBIQUE_CHANNEL", "SOUTH_AFRICA_EAST", "CAPE_GOOD_HOPE"
-    );
-    private static final Set<String> EAST_ASIA_STATIC_NODES = Set.of(
-            "JAPAN_EAST_APPROACH", "JAPAN_SOUTH_APPROACH", "EAST_CHINA_SEA_COAST", "TAIWAN_EAST_APPROACH",
-            "PHILIPPINE_SEA_NORTH", "SOUTH_CHINA_SEA_NORTH", "VIETNAM_COAST", "ANDAMAN_SEA", "MALACCA_WEST",
-            "MALACCA_STRAIT", "MALACCA_SOUTH", "SOUTH_CHINA_SEA", "EAST_CHINA_SEA", "JAVA_SEA", "CELEBES_SEA",
-            "ARAFURA_SEA", "CORAL_SEA", "TASMAN_SEA", "AUSTRALIA_WEST", "AUSTRALIA_NORTH", "AUSTRALIA_EAST",
-            "NEW_ZEALAND_NORTH", "NORTH_PACIFIC_WEST", "NORTH_PACIFIC_CENTRAL", "NORTH_PACIFIC_EAST"
-    );
 
     private final GlobalFishingWatchClient client;
     private final GlobalFishingWatchProperties properties;
-    private final MaritimeNetworkCatalog maritimeNetworkCatalog;
     private final GeoUtils geoUtils;
     private final MaritimeLandMask landMask;
+    private final GlobalFishingWatchOverlayRepository overlayRepository;
+    private final PortRepository portRepository;
     private final AtomicReference<MaritimeCorridorOverlay> cache = new AtomicReference<>();
     private final Object refreshMonitor = new Object();
+    private volatile String cacheConfigHash;
     private CompletableFuture<MaritimeCorridorOverlay> inFlightRefresh;
+
+    @Autowired
+    public GlobalFishingWatchCorridorOverlayProvider(GlobalFishingWatchClient client,
+                                                     GlobalFishingWatchProperties properties,
+                                                     MaritimeNetworkCatalog ignoredNetworkCatalog,
+                                                     GeoUtils geoUtils,
+                                                     MaritimeLandMask landMask,
+                                                     GlobalFishingWatchOverlayRepository overlayRepository,
+                                                     PortRepository portRepository) {
+        this.client = client;
+        this.properties = properties;
+        this.geoUtils = geoUtils;
+        this.landMask = landMask;
+        this.overlayRepository = overlayRepository;
+        this.portRepository = portRepository;
+        this.cache.set(MaritimeCorridorOverlay.empty("GLOBAL_FISHING_WATCH"));
+        loadPersistedOverlay().ifPresent(cache::set);
+    }
 
     public GlobalFishingWatchCorridorOverlayProvider(GlobalFishingWatchClient client,
                                                      GlobalFishingWatchProperties properties,
-                                                     MaritimeNetworkCatalog maritimeNetworkCatalog,
+                                                     MaritimeNetworkCatalog ignoredNetworkCatalog,
                                                      GeoUtils geoUtils,
                                                      MaritimeLandMask landMask) {
         this.client = client;
         this.properties = properties;
-        this.maritimeNetworkCatalog = maritimeNetworkCatalog;
         this.geoUtils = geoUtils;
         this.landMask = landMask;
+        this.overlayRepository = null;
+        this.portRepository = null;
         this.cache.set(MaritimeCorridorOverlay.empty("GLOBAL_FISHING_WATCH"));
     }
 
     @Override
     public MaritimeCorridorOverlay currentOverlay() {
-        return cache.get();
+        String currentConfigHash = computeConfigHash(activeRegions());
+        MaritimeCorridorOverlay current = cache.get();
+        if (!current.isEmpty() && currentConfigHash.equals(cacheConfigHash)) {
+            return current;
+        }
+        return loadPersistedOverlay()
+                .map(overlay -> {
+                    cache.set(overlay);
+                    return overlay;
+                })
+                .orElse(current);
     }
 
     @Override
@@ -137,6 +134,7 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
                 try {
                     if (throwable == null && overlay != null) {
                         cache.set(overlay);
+                        persistOverlay(overlay);
                     }
                 } finally {
                     synchronized (refreshMonitor) {
@@ -147,6 +145,53 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
                 }
             });
             return future;
+        }
+    }
+
+    private java.util.Optional<MaritimeCorridorOverlay> loadPersistedOverlay() {
+        if (overlayRepository == null) {
+            return java.util.Optional.empty();
+        }
+
+        String configHash = computeConfigHash(activeRegions());
+        try {
+            return overlayRepository
+                    .findFirstBySourceAndConfigHashOrderByRefreshedAtDesc("GLOBAL_FISHING_WATCH", configHash)
+                    .map(GlobalFishingWatchOverlayDocument::toOverlay)
+                    .filter(overlay -> !overlay.isEmpty())
+                    .map(overlay -> {
+                        cacheConfigHash = configHash;
+                        logger.info("gfw.overlay.loaded source={} nodes={} edges={} refreshedAt={} configHash={}",
+                                overlay.source(),
+                                overlay.nodeCount(),
+                                overlay.edgeCount(),
+                                overlay.refreshedAt(),
+                                configHash);
+                        return overlay;
+                    });
+        } catch (Exception ex) {
+            logger.warn("gfw.overlay.load.failed configHash={} message={}", configHash, ex.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
+
+    private void persistOverlay(MaritimeCorridorOverlay overlay) {
+        if (overlayRepository == null || overlay == null || overlay.isEmpty()) {
+            return;
+        }
+
+        String configHash = computeConfigHash(activeRegions());
+        try {
+            overlayRepository.save(GlobalFishingWatchOverlayDocument.fromOverlay(configHash, overlay));
+            cacheConfigHash = configHash;
+            logger.info("gfw.overlay.saved source={} nodes={} edges={} refreshedAt={} configHash={}",
+                    overlay.source(),
+                    overlay.nodeCount(),
+                    overlay.edgeCount(),
+                    overlay.refreshedAt(),
+                    configHash);
+        } catch (Exception ex) {
+            logger.warn("gfw.overlay.save.failed configHash={} message={}", configHash, ex.getMessage());
         }
     }
 
@@ -168,7 +213,13 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
         LinkedHashSet<String> encodedEdges = new LinkedHashSet<>();
         List<String> warnings = new ArrayList<>();
 
-        for (GlobalFishingWatchProperties.RegionProperties region : properties.getRegions()) {
+        List<GlobalFishingWatchProperties.RegionProperties> regions = activeRegions();
+        logger.info("gfw.overlay.refresh.regions configuredRegions={} portApproachRegions={} totalRegions={}",
+                properties.getRegions().size(),
+                Math.max(0, regions.size() - properties.getRegions().size()),
+                regions.size());
+
+        for (GlobalFishingWatchProperties.RegionProperties region : regions) {
             List<GlobalFishingWatchClient.PresenceCell> rawCells = client.fetchPresenceCells(region);
             List<GlobalFishingWatchClient.PresenceCell> cells = selectDistributedCells(region, rawCells);
 
@@ -194,7 +245,6 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
             nodesByRegion.put(region.getId(), regionNodes);
 
             connectRegionNeighbors(region, regionNodes, latStep, lonStep, encodedEdges);
-            connectRegionToStaticNetwork(region, regionNodes, encodedEdges);
         }
 
         connectCrossRegionNeighbors(nodesByRegion, encodedEdges);
@@ -205,6 +255,7 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
                 .toList();
 
         logger.info("gfw.overlay.built nodes={} edges={} warnings={}", nodesById.size(), overlayEdges.size(), warnings.size());
+        cacheConfigHash = computeConfigHash(regions);
         return new MaritimeCorridorOverlay(
                 "GLOBAL_FISHING_WATCH",
                 Instant.now(),
@@ -212,6 +263,58 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
                 overlayEdges,
                 List.copyOf(warnings)
         );
+    }
+
+    private List<GlobalFishingWatchProperties.RegionProperties> activeRegions() {
+        LinkedHashMap<String, GlobalFishingWatchProperties.RegionProperties> regionsById = new LinkedHashMap<>();
+        for (GlobalFishingWatchProperties.RegionProperties region : properties.getRegions()) {
+            regionsById.put(region.getId(), region);
+        }
+        for (GlobalFishingWatchProperties.RegionProperties region : portApproachRegions()) {
+            regionsById.putIfAbsent(region.getId(), region);
+        }
+        return List.copyOf(regionsById.values());
+    }
+
+    private List<GlobalFishingWatchProperties.RegionProperties> portApproachRegions() {
+        if (!properties.isIncludePortApproachRegions()
+                || portRepository == null
+                || properties.getMaxPortApproachRegions() == 0) {
+            return List.of();
+        }
+
+        Map<String, RegionBounds> boundsByGrid = new LinkedHashMap<>();
+        double gridDegrees = properties.getPortApproachRegionGridDegrees();
+        double radiusDegrees = properties.getPortApproachRegionRadiusDegrees();
+        try {
+            for (PortDocument port : portRepository.findAll()) {
+                if (port == null || port.isDisabled() || port.getCoordinates() == null) {
+                    continue;
+                }
+                double latitude = clampLatitude(port.getCoordinates().getLatitude());
+                double longitude = normalizeLongitude(port.getCoordinates().getLongitude());
+                int latBucket = (int) Math.floor((latitude + 90.0) / gridDegrees);
+                int lonBucket = (int) Math.floor((longitude + 180.0) / gridDegrees);
+                String key = latBucket + ":" + lonBucket;
+                boundsByGrid
+                        .computeIfAbsent(key, ignored -> new RegionBounds())
+                        .include(latitude, longitude, radiusDegrees);
+            }
+        } catch (Exception ex) {
+            logger.warn("gfw.overlay.port-approach-regions.failed message={}", ex.getMessage());
+            return List.of();
+        }
+
+        List<GlobalFishingWatchProperties.RegionProperties> generated = boundsByGrid.entrySet().stream()
+                .limit(properties.getMaxPortApproachRegions())
+                .map(entry -> entry.getValue().toRegion("port-approach-" + entry.getKey().replace(':', '-')))
+                .toList();
+        if (boundsByGrid.size() > generated.size()) {
+            logger.warn("gfw.overlay.port-approach-regions.truncated generated={} max={}",
+                    boundsByGrid.size(),
+                    properties.getMaxPortApproachRegions());
+        }
+        return generated;
     }
 
     private boolean isUsefulCell(GlobalFishingWatchClient.PresenceCell cell) {
@@ -321,38 +424,32 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
         }
     }
 
-    private void connectRegionToStaticNetwork(GlobalFishingWatchProperties.RegionProperties region,
-                                              List<MaritimeNode> regionNodes,
-                                              LinkedHashSet<String> encodedEdges) {
-        List<MaritimeNode> staticNodes = maritimeNetworkCatalog.coreNodes();
-        for (MaritimeNode node : regionNodes) {
-            staticNodes.stream()
-                    .map(candidate -> new NodeDistance(candidate, geoUtils.calculateHaversineDistanceNm(node.getCoordinates(), candidate.getCoordinates())))
-                    .filter(distance -> isBridgeCompatibleWithRegion(region.getId(), distance.node().getId()))
-                    .filter(distance -> distance.distanceNm() <= maxBridgeDistanceNmForRegion(region.getId()))
-                    .filter(distance -> hasStaticBridgeSupport(node, distance.node(), regionNodes))
-                    .sorted(Comparator.comparingDouble(NodeDistance::distanceNm))
-                    .limit(properties.getBridgeConnections())
-                    .forEach(distance -> encodedEdges.add(encodeEdge(node.getId(), distance.node().getId())));
-        }
-    }
-
     private void connectCrossRegionNeighbors(Map<String, List<MaritimeNode>> nodesByRegion, LinkedHashSet<String> encodedEdges) {
         List<RegionNode> allNodes = nodesByRegion.entrySet().stream()
                 .flatMap(entry -> entry.getValue().stream().map(node -> new RegionNode(entry.getKey(), node)))
                 .toList();
+        int bridgeConnections = properties.getBridgeConnections();
+        int candidateLimit = Math.max(bridgeConnections * 6, bridgeConnections);
 
         for (RegionNode current : allNodes) {
+            Coordinates currentCoordinates = current.node().getCoordinates();
             allNodes.stream()
                     .filter(candidate -> !candidate.regionId().equals(current.regionId()))
                     .filter(candidate -> areCrossRegionNeighborsCompatible(current.regionId(), candidate.regionId()))
                     .filter(candidate -> !candidate.node().equals(current.node()))
+                    .filter(candidate -> isWithinDistanceEnvelope(
+                            currentCoordinates,
+                            candidate.node().getCoordinates(),
+                            maxCrossRegionDistanceNm(current.regionId(), candidate.regionId())
+                    ))
                     .map(candidate -> new RegionNodeDistance(
                             candidate.regionId(),
                             candidate.node(),
-                            geoUtils.calculateHaversineDistanceNm(current.node().getCoordinates(), candidate.node().getCoordinates())
+                            geoUtils.calculateHaversineDistanceNm(currentCoordinates, candidate.node().getCoordinates())
                     ))
                     .filter(distance -> distance.distanceNm() <= maxCrossRegionDistanceNm(current.regionId(), distance.regionId()))
+                    .sorted(Comparator.comparingDouble(RegionNodeDistance::distanceNm))
+                    .limit(candidateLimit)
                     .filter(distance -> hasCorridorSupport(
                             current.node(),
                             distance.node(),
@@ -363,10 +460,24 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
                             CROSS_REGION_SUPPORT_SPACING_NM,
                             CROSS_REGION_SUPPORT_RADIUS_NM
                     ))
-                    .sorted(Comparator.comparingDouble(RegionNodeDistance::distanceNm))
-                    .limit(CROSS_REGION_CONNECTIONS)
+                    .limit(bridgeConnections)
                     .forEach(distance -> encodedEdges.add(encodeEdge(current.node().getId(), distance.node().getId())));
         }
+    }
+
+    private boolean isWithinDistanceEnvelope(Coordinates first, Coordinates second, double maxDistanceNm) {
+        double maxLatDelta = maxDistanceNm / 60.0;
+        double latDelta = Math.abs(first.latitude() - second.latitude());
+        if (latDelta > maxLatDelta) {
+            return false;
+        }
+
+        double referenceLatitude = Math.toRadians((first.latitude() + second.latitude()) / 2.0);
+        double lonNmPerDegree = Math.max(1.0, 60.0 * Math.cos(referenceLatitude));
+        double maxLonDelta = maxDistanceNm / lonNmPerDegree;
+        double lonDelta = Math.abs(first.longitude() - second.longitude());
+        lonDelta = Math.min(lonDelta, 360.0 - lonDelta);
+        return lonDelta <= maxLonDelta;
     }
 
     private boolean hasCorridorSupport(MaritimeNode from,
@@ -389,29 +500,6 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
             boolean supported = supportNodes.stream()
                     .filter(node -> !node.equals(from) && !node.equals(to))
                     .anyMatch(node -> geoUtils.calculateHaversineDistanceNm(sample, node.getCoordinates()) <= supportRadiusNm);
-            if (!supported) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean hasStaticBridgeSupport(MaritimeNode gfwNode, MaritimeNode staticNode, List<MaritimeNode> regionNodes) {
-        double distanceNm = geoUtils.calculateHaversineDistanceNm(gfwNode.getCoordinates(), staticNode.getCoordinates());
-        if (distanceNm <= BRIDGE_SUPPORT_RADIUS_NM) {
-            return true;
-        }
-
-        List<Coordinates> sampledPath = geoUtils.densifyPath(List.of(gfwNode.getCoordinates(), staticNode.getCoordinates()), BRIDGE_SUPPORT_RADIUS_NM);
-        if (sampledPath.size() <= 2) {
-            return true;
-        }
-
-        for (int index = 1; index < sampledPath.size() - 1; index++) {
-            Coordinates sample = sampledPath.get(index);
-            boolean supported = regionNodes.stream()
-                    .filter(node -> !node.equals(gfwNode))
-                    .anyMatch(node -> geoUtils.calculateHaversineDistanceNm(sample, node.getCoordinates()) <= BRIDGE_SUPPORT_RADIUS_NM);
             if (!supported) {
                 return false;
             }
@@ -449,87 +537,6 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
         return List.copyOf(merged.values());
     }
 
-    private boolean isBridgeCompatibleWithRegion(String regionId, String staticNodeId) {
-        Set<String> allowedNodes = allowedStaticNodesForRegion(regionId);
-        return allowedNodes.isEmpty() || allowedNodes.contains(staticNodeId);
-    }
-
-    private Set<String> allowedStaticNodesForRegion(String regionId) {
-        Set<String> allowed = new HashSet<>();
-        if (regionId.startsWith("north-pacific") || regionId.startsWith("south-pacific")) {
-            allowed.addAll(PACIFIC_STATIC_NODES);
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("peru-ecuador-coast")) {
-            allowed.addAll(Set.of(
-                    "PACIFIC_SOUTH_EAST", "PACIFIC_TROPICAL_EAST", "PANAMA_PACIFIC_OUTER", "PANAMA_PACIFIC"
-            ));
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("atlantic-")) {
-            allowed.addAll(ATLANTIC_STATIC_NODES);
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("caribbean-panama-west")) {
-            allowed.addAll(Set.of(
-                    "PANAMA_ATLANTIC", "PANAMA_CARIBBEAN_OUTER", "CARIBBEAN_SW", "CARIBBEAN_WEST", "CARIBBEAN_COLOMBIA"
-            ));
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("caribbean-panama-east")) {
-            allowed.addAll(ATLANTIC_STATIC_NODES);
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("mediterranean-")) {
-            allowed.addAll(MEDITERRANEAN_STATIC_NODES);
-            allowed.add("GIBRALTAR_STRAIT");
-            allowed.add("GIBRALTAR_WEST");
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("iberia-atlantic-approach")) {
-            allowed.addAll(Set.of(
-                    "GIBRALTAR_WEST", "IBERIA_WEST", "PORTUGAL_APPROACH",
-                    "MADEIRA_APPROACH", "AZORES_SOUTH", "AZORES_CORRIDOR"
-            ));
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("iberia-mediterranean-approach")) {
-            allowed.addAll(Set.of(
-                    "GIBRALTAR_WEST", "GIBRALTAR_STRAIT", "ALBORAN_SEA",
-                    "WEST_MEDITERRANEAN", "IBERIA_WEST"
-            ));
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("suez-north")) {
-            allowed.addAll(MEDITERRANEAN_STATIC_NODES);
-            allowed.addAll(RED_SEA_STATIC_NODES);
-            allowed.add("SUEZ_CANAL");
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("red-sea-")) {
-            allowed.addAll(RED_SEA_STATIC_NODES);
-            allowed.add("SUEZ_CANAL");
-            allowed.add("SUEZ_NORTH");
-            allowed.add("GULF_OF_OMAN");
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("indian-ocean-")) {
-            allowed.addAll(INDIAN_STATIC_NODES);
-            allowed.add("GULF_OF_ADEN");
-            allowed.add("RED_SEA_SOUTH");
-            allowed.add("MALACCA_WEST");
-            allowed.add("MALACCA_STRAIT");
-            allowed.add("MALACCA_SOUTH");
-            return Set.copyOf(allowed);
-        }
-        if (regionId.startsWith("east-asia-")) {
-            allowed.addAll(EAST_ASIA_STATIC_NODES);
-            allowed.addAll(INDIAN_STATIC_NODES);
-            return Set.copyOf(allowed);
-        }
-        return Set.of();
-    }
-
     private BucketCoordinate bucketFor(GlobalFishingWatchProperties.RegionProperties region,
                                        Coordinates coordinates,
                                        double latStep,
@@ -557,8 +564,8 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
 
     private boolean isNavigableOverlayEdge(String encoded, Map<String, MaritimeNode> overlayNodesById) {
         MaritimeNetworkCatalog.EdgeDefinition edge = decodeEdge(encoded);
-        MaritimeNode fromNode = resolveOverlayOrStaticNode(edge.fromNodeId(), overlayNodesById);
-        MaritimeNode toNode = resolveOverlayOrStaticNode(edge.toNodeId(), overlayNodesById);
+        MaritimeNode fromNode = overlayNodesById.get(edge.fromNodeId());
+        MaritimeNode toNode = overlayNodesById.get(edge.toNodeId());
         if (fromNode == null || toNode == null) {
             return false;
         }
@@ -580,19 +587,6 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
             return 180.0;
         }
         return properties.getMaxNeighborDistanceNm();
-    }
-
-    private double maxBridgeDistanceNmForRegion(String regionId) {
-        if (regionId.startsWith("peru-ecuador-coast")) {
-            return 280.0;
-        }
-        if (regionId.startsWith("caribbean-panama-west") || regionId.startsWith("caribbean-panama-east")) {
-            return 240.0;
-        }
-        if (regionId.startsWith("iberia-atlantic-approach") || regionId.startsWith("iberia-mediterranean-approach")) {
-            return 220.0;
-        }
-        return properties.getMaxBridgeDistanceNm();
     }
 
     private double maxCrossRegionDistanceNm(String firstRegionId, String secondRegionId) {
@@ -650,18 +644,72 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
         return lastSeparator > 4 ? nodeId.substring(4, lastSeparator) : "";
     }
 
-    private MaritimeNode resolveOverlayOrStaticNode(String nodeId, Map<String, MaritimeNode> overlayNodesById) {
-        MaritimeNode overlayNode = overlayNodesById.get(nodeId);
-        if (overlayNode != null) {
-            return overlayNode;
-        }
-        return maritimeNetworkCatalog.findNode(nodeId).orElse(null);
-    }
-
     private String formatCoord(double value) {
-        return Normalizer.normalize(String.format(Locale.US, "%.2f", value), Normalizer.Form.NFD)
+        return Normalizer.normalize(String.format(java.util.Locale.US, "%.2f", value), Normalizer.Form.NFD)
                 .replace('.', '_')
                 .replace('-', 'm');
+    }
+
+    private double clampLatitude(double latitude) {
+        return Math.max(-89.9999, Math.min(89.9999, latitude));
+    }
+
+    private double normalizeLongitude(double longitude) {
+        double normalized = longitude;
+        while (normalized < -180.0) {
+            normalized += 360.0;
+        }
+        while (normalized > 180.0) {
+            normalized -= 360.0;
+        }
+        return normalized;
+    }
+
+    private String computeConfigHash(List<GlobalFishingWatchProperties.RegionProperties> activeRegions) {
+        String regions = activeRegions.stream()
+                .map(region -> "%s:%s:%s:%s:%s".formatted(
+                        region.getId(),
+                        formatConfigDouble(region.getMinLat()),
+                        formatConfigDouble(region.getMinLon()),
+                        formatConfigDouble(region.getMaxLat()),
+                        formatConfigDouble(region.getMaxLon())
+                ))
+                .sorted()
+                .reduce((left, right) -> left + "|" + right)
+                .orElse("none");
+        String vesselTypes = properties.getVesselTypes().stream()
+                .sorted()
+                .reduce((left, right) -> left + "," + right)
+                .orElse("none");
+        String signature = "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s".formatted(
+                properties.getStartDate(),
+                properties.getEndDate(),
+                properties.getSpatialResolution(),
+                properties.getTemporalResolution(),
+                properties.getMaxCellsPerRegion(),
+                properties.getNearestNeighbors(),
+                properties.getBridgeConnections(),
+                formatConfigDouble(properties.getMinHours()),
+                properties.getMinVesselIds(),
+                vesselTypes,
+                formatConfigDouble(properties.getMaxNeighborDistanceNm()),
+                formatConfigDouble(properties.getMaxBridgeDistanceNm()),
+                regions
+        );
+        return sha256(signature);
+    }
+
+    private String formatConfigDouble(double value) {
+        return String.format(java.util.Locale.US, "%.4f", value);
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 no esta disponible", ex);
+        }
     }
 
     private record NodeDistance(MaritimeNode node, double distanceNm) {
@@ -674,5 +722,30 @@ public class GlobalFishingWatchCorridorOverlayProvider implements MaritimeCorrid
     }
 
     private record BucketCoordinate(int latBucket, int lonBucket) {
+    }
+
+    private final class RegionBounds {
+        private double minLat = Double.POSITIVE_INFINITY;
+        private double minLon = Double.POSITIVE_INFINITY;
+        private double maxLat = Double.NEGATIVE_INFINITY;
+        private double maxLon = Double.NEGATIVE_INFINITY;
+
+        private void include(double latitude, double longitude, double radiusDegrees) {
+            minLat = Math.min(minLat, clampLatitude(latitude - radiusDegrees));
+            maxLat = Math.max(maxLat, clampLatitude(latitude + radiusDegrees));
+            minLon = Math.min(minLon, normalizeLongitude(longitude - radiusDegrees));
+            maxLon = Math.max(maxLon, normalizeLongitude(longitude + radiusDegrees));
+        }
+
+        private GlobalFishingWatchProperties.RegionProperties toRegion(String id) {
+            return new GlobalFishingWatchProperties.RegionProperties(
+                    id,
+                    "Port Approach AIS Region",
+                    minLat,
+                    minLon,
+                    maxLat,
+                    maxLon
+            );
+        }
     }
 }

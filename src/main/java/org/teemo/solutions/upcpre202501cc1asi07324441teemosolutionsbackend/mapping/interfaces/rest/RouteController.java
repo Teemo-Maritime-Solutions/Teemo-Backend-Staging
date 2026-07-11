@@ -26,6 +26,7 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.documents.RoutePopularityDocument;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteCalculationResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteDistanceResource;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteMetadataResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.RouteRecalculationResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.interfaces.rest.resources.PopularRouteResource;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.shared.application.security.RoutingActorContext;
@@ -59,6 +60,8 @@ public class RouteController {
             @RequestParam("startPortId") String startPortId,
             @Parameter(description = "ID del puerto de destino", required = true)
             @RequestParam("endPortId") String endPortId) {
+        long startedAt = System.nanoTime();
+        logger.info("route.api.calculate.start startPortId={} endPortId={}", startPortId, endPortId);
         try {
             RoutingActorContext actor = actorContextProvider.currentActor();
             RouteHistoryContext historyContext = RouteHistoryContext.builder()
@@ -68,31 +71,42 @@ public class RouteController {
                     .metadata(Map.of("endpoint", "/api/routes/calculate-optimal-route"))
                     .build();
             RouteCalculationResource optimalRoute = routeService.calculateOptimalRoute(startPortId, endPortId, historyContext);
+            long elapsedMs = java.time.Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+            logger.info("route.api.calculate.completed startPortId={} endPortId={} elapsedMs={} distanceNm={}",
+                    startPortId,
+                    endPortId,
+                    elapsedMs,
+                    optimalRoute.totalDistance());
             return ResponseEntity.ok(optimalRoute);
         } catch (PortNotFoundException e) {
+            logger.warn("route.api.calculate.port-not-found startPortId={} endPortId={} message={}", startPortId, endPortId, e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(new RouteCalculationResource(
                             List.of(),
                             0.0,
                             List.of("Error: " + e.getMessage()),
-                            Map.of()
+                            Map.of(),
+                            RouteMetadataResource.empty()
                     ));
         } catch (RouteNotFoundException e) {
+            logger.warn("route.api.calculate.not-found startPortId={} endPortId={} message={}", startPortId, endPortId, e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(new RouteCalculationResource(
                             List.of(),
                             0.0,
                             List.of("Ruta no disponible: " + e.getMessage()),
-                            Map.of()
+                            Map.of(),
+                            RouteMetadataResource.empty()
                     ));
         } catch (Exception e) {
-            logger.error("Error interno: ", e);
+            logger.error("route.api.calculate.failed startPortId={} endPortId={}", startPortId, endPortId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new RouteCalculationResource(
                             List.of(),
                             0.0,
                             List.of("Error interno. Revisa el Log interno."),
-                            Map.of()
+                            Map.of(),
+                            RouteMetadataResource.empty()
                     ));
         }
     }

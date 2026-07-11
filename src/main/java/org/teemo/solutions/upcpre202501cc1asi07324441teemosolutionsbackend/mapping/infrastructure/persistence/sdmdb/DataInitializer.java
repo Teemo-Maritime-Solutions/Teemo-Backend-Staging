@@ -1,16 +1,22 @@
 package org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb;
 
-import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
-import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.application.internal.services.PortService;
-import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.application.internal.services.RouteService;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.entities.Port;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.documents.PortDocument;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.documents.RouteDocument;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.PortRepository;
+import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.infrastructure.persistence.sdmdb.repositories.RouteRepository;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,28 +24,41 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Component
-public class DataInitializer {
+@Lazy(false)
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@ConditionalOnProperty(name = "app.seed.mapping.enabled", havingValue = "true", matchIfMissing = true)
+public class DataInitializer implements ApplicationRunner {
 
     private final Logger logger = LoggerFactory.getLogger(DataInitializer.class);
+    private static final double COORDINATE_EPSILON = 0.000001;
 
-    private final PortService portService;
-    private final RouteService routeService;
+    private final PortRepository portRepository;
+    private final RouteRepository routeRepository;
+
+    @Value("${app.seed.mapping.reset:false}")
+    private boolean resetOnStartup;
 
     @Autowired
-    public DataInitializer(PortService portService, RouteService routeService) {
-        this.portService = portService;
-        this.routeService = routeService;
+    public DataInitializer(PortRepository portRepository, RouteRepository routeRepository) {
+        this.portRepository = portRepository;
+        this.routeRepository = routeRepository;
     }
 
-    @PostConstruct
+    @Override
+    public void run(ApplicationArguments args) {
+        init();
+    }
+
     public void init() {
-        try {
-            logger.info("Limpiando colecciones de rutas y puertos existentes...");
-            routeService.deleteAllRoutes();
-            portService.deleteAllPorts();
-            logger.info("Colecciones limpiadas exitosamente.");
-        } catch (Exception e) {
-            logger.error("Error limpiando las colecciones: {}", e.getMessage(), e);
+        if (resetOnStartup) {
+            try {
+                logger.info("Reiniciando colecciones de rutas y puertos por app.seed.mapping.reset=true...");
+                routeRepository.deleteAll();
+                portRepository.deleteAll();
+                logger.info("Colecciones reiniciadas exitosamente.");
+            } catch (Exception e) {
+                logger.error("Error limpiando las colecciones: {}", e.getMessage(), e);
+            }
         }
 
         // =================================================================================
@@ -109,14 +128,14 @@ public class DataInitializer {
                     new Port("Balboa", new Coordinates(8.939008, -79.555637), "América"),
                     new Port("Manzanillo", new Coordinates(19.0514, -104.3158), "América"),
                     new Port("Long Beach", new Coordinates(33.7709, -118.1937), "América"),
-                    new Port("New York", new Coordinates(40.7128, -74.0060), "América"),
+                    new Port("New York", new Coordinates(40.702714, -74.005678), "América"),
                     new Port("Houston", new Coordinates(29.7604, -95.3698), "América"),
                     new Port("San Francisco", new Coordinates(37.7749, -122.4194), "América"),
                     new Port("Vancouver", new Coordinates(49.2827, -123.1207), "América"),
                     new Port("Prince Rupert", new Coordinates(54.3150, -130.3208), "América"),
                     new Port("Cayena", new Coordinates(4.9372, -52.3260), "América"),
-                    new Port("Cartagena", new Coordinates(10.3932, -75.4832), "América"),
-                    new Port("Puerto Cabello", new Coordinates(10.4731, -68.0125), "América"),
+                    new Port("Cartagena", new Coordinates(10.403063, -75.533398), "América"),
+                    new Port("Puerto Cabello", new Coordinates(10.476070, -67.995836), "América"),
                     new Port("San Antonio", new Coordinates(-33.5983, -71.6123), "América"),
                     new Port("Montreal", new Coordinates(45.5017, -73.5673), "América"),
                     new Port("Rio Grande", new Coordinates(-32.0351, -52.0986), "América"),
@@ -203,19 +222,37 @@ public class DataInitializer {
                     new Port("Puerto de Crimea", new Coordinates(45.3481, 34.4993), "Europa")
             );
 
-            // Se insertan solo los que no existen para optimizar, aunque ya limpiamos antes.
-            List<Port> newPorts = new ArrayList<>();
+            List<PortDocument> portsToSave = new ArrayList<>();
+            int inserted = 0;
+            int updated = 0;
+            int unchanged = 0;
             for (Port port : ports) {
-                if (!portService.existsByNameAndContinent(port.getName(), port.getContinent())) {
-                    newPorts.add(port);
+                Optional<PortDocument> existing = portRepository.findByNameAndContinent(port.getName(), port.getContinent());
+                if (existing.isEmpty()) {
+                    portsToSave.add(toPortDocument(port));
+                    inserted++;
+                    continue;
+                }
+
+                PortDocument document = existing.get();
+                if (coordinatesChanged(document.getCoordinates(), port.getCoordinates())) {
+                    document.setCoordinates(new PortDocument.CoordinatesDocument(
+                            port.getCoordinates().latitude(),
+                            port.getCoordinates().longitude()
+                    ));
+                    portsToSave.add(document);
+                    updated++;
+                } else {
+                    unchanged++;
                 }
             }
 
-            if (!newPorts.isEmpty()) {
-                portService.saveAllPorts(newPorts);
-                logger.info("Insertados {} nuevos puertos.", newPorts.size());
+            if (!portsToSave.isEmpty()) {
+                portRepository.saveAll(portsToSave);
+                logger.info("Puertos semilla sincronizados. insertados={} actualizados={} sinCambios={} total={}",
+                        inserted, updated, unchanged, ports.size());
             } else {
-                logger.info("No se insertaron puertos nuevos, ya existían (o la lista estaba vacía).");
+                logger.info("Puertos semilla ya sincronizados. total={}", ports.size());
             }
         } catch (Exception e) {
             logger.error("Error inicializando puertos: {}", e.getMessage(), e);
@@ -444,10 +481,60 @@ public class DataInitializer {
                     new RouteDocument("Hamburgo", "Europa", "Copenhague", "Europa", 500.0)
             );
 
-            List<RouteDocument> distinctRoutes = routes.stream().distinct().collect(Collectors.toList());
+            List<RouteDocument> distinctRoutes = routes.stream()
+                    .collect(Collectors.toMap(
+                            this::routeKey,
+                            route -> route,
+                            (existing, replacement) -> replacement,
+                            java.util.LinkedHashMap::new
+                    ))
+                    .values()
+                    .stream()
+                    .toList();
 
-            routeService.saveAllRoutes(distinctRoutes);
-            logger.info("Insertadas {} nuevas rutas.", distinctRoutes.size());
+            List<RouteDocument> routesToSave = new ArrayList<>();
+            int inserted = 0;
+            int updated = 0;
+            int unchanged = 0;
+            int duplicatesRemoved = 0;
+            for (RouteDocument route : distinctRoutes) {
+                List<RouteDocument> existingRoutes = routeRepository.findAllByHomePortAndHomePortContinentAndDestinationPortAndDestinationPortContinent(
+                        route.getHomePort(),
+                        route.getHomePortContinent(),
+                        route.getDestinationPort(),
+                        route.getDestinationPortContinent()
+                );
+                if (existingRoutes.isEmpty()) {
+                    routesToSave.add(route);
+                    inserted++;
+                    continue;
+                }
+
+                RouteDocument document = existingRoutes.get(0);
+                if (existingRoutes.size() > 1) {
+                    List<RouteDocument> duplicates = existingRoutes.subList(1, existingRoutes.size());
+                    routeRepository.deleteAll(duplicates);
+                    duplicatesRemoved += duplicates.size();
+                    logger.warn("Rutas semilla duplicadas removidas. route={} duplicates={}",
+                            routeKey(route), duplicates.size());
+                }
+
+                if (routeChanged(document, route)) {
+                    document.setHomePortContinent(route.getHomePortContinent());
+                    document.setDestinationPortContinent(route.getDestinationPortContinent());
+                    document.setDistance(route.getDistance());
+                    routesToSave.add(document);
+                    updated++;
+                } else {
+                    unchanged++;
+                }
+            }
+
+            if (!routesToSave.isEmpty()) {
+                routeRepository.saveAll(routesToSave);
+            }
+            logger.info("Rutas semilla sincronizadas. insertadas={} actualizadas={} sinCambios={} duplicadasRemovidas={} total={}",
+                    inserted, updated, unchanged, duplicatesRemoved, distinctRoutes.size());
 
         } catch (Exception e) {
             logger.error("Error fatal inicializando rutas: {}", e.getMessage(), e);
@@ -455,10 +542,10 @@ public class DataInitializer {
         }
     }
     private void validateRoutes() {
-        List<RouteDocument> routes = routeService.findAllRoutes();
+        List<RouteDocument> routes = routeRepository.findAll();
         for (RouteDocument route : routes) {
-            Optional<PortDocument> homePortExists = portService.findByNameAndContinent(route.getHomePort(), route.getHomePortContinent());
-            Optional<PortDocument> destinationPortExists = portService.findByNameAndContinent(route.getDestinationPort(), route.getDestinationPortContinent());
+            Optional<PortDocument> homePortExists = portRepository.findByNameAndContinent(route.getHomePort(), route.getHomePortContinent());
+            Optional<PortDocument> destinationPortExists = portRepository.findByNameAndContinent(route.getDestinationPort(), route.getDestinationPortContinent());
 
             if (homePortExists.isEmpty()) {
                 throw new IllegalStateException("Ruta inválida (Puerto de Origen no existe): " + route.getHomePort()
@@ -470,5 +557,35 @@ public class DataInitializer {
                         + " (" + route.getDestinationPortContinent() + ")");
             }
         }
+    }
+
+    private PortDocument toPortDocument(Port port) {
+        return new PortDocument(
+                port.getName(),
+                new PortDocument.CoordinatesDocument(
+                        port.getCoordinates().latitude(),
+                        port.getCoordinates().longitude()
+                ),
+                port.getContinent()
+        );
+    }
+
+    private boolean coordinatesChanged(PortDocument.CoordinatesDocument current, Coordinates expected) {
+        return current == null
+                || Math.abs(current.getLatitude() - expected.latitude()) > COORDINATE_EPSILON
+                || Math.abs(current.getLongitude() - expected.longitude()) > COORDINATE_EPSILON;
+    }
+
+    private String routeKey(RouteDocument route) {
+        return route.getHomePort()
+                + "|" + route.getHomePortContinent()
+                + "|" + route.getDestinationPort()
+                + "|" + route.getDestinationPortContinent();
+    }
+
+    private boolean routeChanged(RouteDocument current, RouteDocument expected) {
+        return !java.util.Objects.equals(current.getHomePortContinent(), expected.getHomePortContinent())
+                || !java.util.Objects.equals(current.getDestinationPortContinent(), expected.getDestinationPortContinent())
+                || !java.util.Objects.equals(current.getDistance(), expected.getDistance());
     }
 }

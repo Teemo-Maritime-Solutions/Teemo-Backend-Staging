@@ -6,5 +6,6 @@ public record RouteRecalculationResource(
         String routeId,
         List<String> optimalRoute,
         boolean recalculated,
-        List<String> avoidedPortIds
+        List<String> avoidedPortIds,
+        RouteMetadataResource metadata
 ) {}

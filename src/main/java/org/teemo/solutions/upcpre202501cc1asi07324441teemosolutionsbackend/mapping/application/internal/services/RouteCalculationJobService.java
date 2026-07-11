@@ -10,9 +10,7 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -80,14 +78,15 @@ public class RouteCalculationJobService {
                 viaPortIds != null ? viaPortIds.size() : 0,
                 enforceViaPorts);
         try {
-            RouteCalculationResource result = routeService.calculateOptimalRoute(
-                    startPortId,
-                    endPortId,
-                    viaPortIds != null ? viaPortIds : List.of(),
-                    enforceViaPorts,
-                    Collections.emptySet(),
-                    historyContext
-            );
+            if ((viaPortIds != null && !viaPortIds.isEmpty()) || enforceViaPorts) {
+                logger.warn("route.calculation.job.via-ports.ignored jobId={} startPortId={} endPortId={} viaCount={} enforceViaPorts={}",
+                        jobId,
+                        startPortId,
+                        endPortId,
+                        viaPortIds != null ? viaPortIds.size() : 0,
+                        enforceViaPorts);
+            }
+            RouteCalculationResource result = routeService.calculateOptimalRoute(startPortId, endPortId, Collections.emptySet(), historyContext);
             long elapsedMs = java.time.Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
             updateJob(jobId, RouteCalculationJobState.COMPLETED, "Ruta calculada correctamente.", result, null);
             logger.info("route.calculation.job.completed jobId={} startPortId={} endPortId={} elapsedMs={} distanceNm={}",

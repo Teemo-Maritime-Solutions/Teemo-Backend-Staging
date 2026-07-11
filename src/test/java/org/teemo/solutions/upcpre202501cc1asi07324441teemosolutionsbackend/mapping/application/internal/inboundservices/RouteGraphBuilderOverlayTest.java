@@ -1,9 +1,9 @@
 package org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.application.internal.inboundservices;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.Coordinates;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.GeoUtils;
-import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeEdge;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeLandMask;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeNode;
 import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.valueobjects.MaritimeNodeType;
@@ -15,6 +15,7 @@ import org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mappi
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -25,370 +26,271 @@ import static org.mockito.Mockito.when;
 class RouteGraphBuilderOverlayTest {
 
     @Test
-    void shouldMergeOverlayNodesIntoDynamicGraph() {
+    void shouldMergeAisOverlayNodesIntoDynamicGraph() {
         PortRepository portRepository = mock(PortRepository.class);
         when(portRepository.findAll()).thenReturn(List.of());
 
-        MaritimeNode overlayNode = MaritimeNode.seaNode(
-                "GFW:test:1",
-                "GFW Test Node",
-                MaritimeNodeType.SEA_WAYPOINT,
-                new Coordinates(9.4, -79.7)
+        MaritimeNode west = overlayNode("GFW:pacific:test:west", 17.5, -148.0);
+        MaritimeNode east = overlayNode("GFW:pacific:test:east", 8.0, -110.0);
+        MaritimeCorridorOverlay overlay = overlayOf(
+                List.of(west, east),
+                List.of(new MaritimeNetworkCatalog.EdgeDefinition(west.getId(), east.getId(), false, false, false))
         );
-        MaritimeCorridorOverlayProvider overlayProvider = new MaritimeCorridorOverlayProvider() {
-            @Override
-            public MaritimeCorridorOverlay currentOverlay() {
-                return overlay();
-            }
 
-            @Override
-            public MaritimeCorridorOverlay refreshOverlay() {
-                return overlay();
-            }
-
-            private MaritimeCorridorOverlay overlay() {
-                return new MaritimeCorridorOverlay(
-                        "GLOBAL_FISHING_WATCH",
-                        Instant.now(),
-                        List.of(overlayNode),
-                        List.of(
-                                new MaritimeNetworkCatalog.EdgeDefinition("GFW:test:1", "PANAMA_PACIFIC", false, false, false)
-                        ),
-                        List.of()
-                );
-            }
-        };
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()) {
-                    @Override
-                    public boolean crossesLand(List<Coordinates> path) {
-                        return false;
-                    }
-                },
-                overlayProvider
-        );
+        RouteGraphBuilder builder = builder(portRepository, alwaysWaterMask(), overlay);
 
         RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
 
-        assertThat(graph.findNode("GFW:test:1")).isPresent();
-        assertThat(graph.findNode("PANAMA_PACIFIC")).isPresent();
-        assertThat(graph.findEdge(graph.findNode("GFW:test:1").orElseThrow(), graph.findNode("PANAMA_PACIFIC").orElseThrow()))
-                .isPresent();
+        assertThat(graph.findNode(west.getId())).isPresent();
+        assertThat(graph.findNode(east.getId())).isPresent();
+        assertThat(graph.findEdge(west, east)).isPresent();
     }
 
     @Test
-    void shouldReplaceLongStaticCorridorWhenOverlayCoversBothSides() {
+    void shouldIgnoreOverlayEdgesThatReferenceNodesOutsideTheAisOverlay() {
         PortRepository portRepository = mock(PortRepository.class);
         when(portRepository.findAll()).thenReturn(List.of());
 
-        MaritimeNode overlayWest = MaritimeNode.seaNode(
-                "GFW:atlantic:test:west",
-                "GFW Atlantic West",
-                MaritimeNodeType.SEA_WAYPOINT,
-                new Coordinates(34.2, -67.8)
-        );
-        MaritimeNode overlayCentral = MaritimeNode.seaNode(
-                "GFW:atlantic:test:central",
-                "GFW Atlantic Central",
-                MaritimeNodeType.SEA_WAYPOINT,
-                new Coordinates(36.1, -42.2)
+        MaritimeNode onlyNode = overlayNode("GFW:single:test", 9.2, -79.8);
+        MaritimeCorridorOverlay overlay = overlayOf(
+                List.of(onlyNode),
+                List.of(new MaritimeNetworkCatalog.EdgeDefinition(onlyNode.getId(), "PANAMA_PACIFIC", false, false, false))
         );
 
-        MaritimeCorridorOverlayProvider overlayProvider = new MaritimeCorridorOverlayProvider() {
-            @Override
-            public MaritimeCorridorOverlay currentOverlay() {
-                return overlay();
-            }
-
-            @Override
-            public MaritimeCorridorOverlay refreshOverlay() {
-                return overlay();
-            }
-
-            private MaritimeCorridorOverlay overlay() {
-                return new MaritimeCorridorOverlay(
-                        "GLOBAL_FISHING_WATCH",
-                        Instant.now(),
-                        List.of(overlayWest, overlayCentral),
-                        List.of(
-                                new MaritimeNetworkCatalog.EdgeDefinition("GFW:atlantic:test:west", "NORTH_ATLANTIC_WEST", false, false, false),
-                                new MaritimeNetworkCatalog.EdgeDefinition("GFW:atlantic:test:central", "NORTH_ATLANTIC_CENTRAL", false, false, false),
-                                new MaritimeNetworkCatalog.EdgeDefinition("GFW:atlantic:test:west", "GFW:atlantic:test:central", false, false, false)
-                        ),
-                        List.of()
-                );
-            }
-        };
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()),
-                overlayProvider
-        );
+        RouteGraphBuilder builder = builder(portRepository, alwaysWaterMask(), overlay);
 
         RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
-        MaritimeNode west = graph.findNode("NORTH_ATLANTIC_WEST").orElseThrow();
-        MaritimeNode central = graph.findNode("NORTH_ATLANTIC_CENTRAL").orElseThrow();
 
-        assertThat(graph.findEdge(west, central)).isEmpty();
-        assertThat(graph.findEdge(graph.findNode("GFW:atlantic:test:west").orElseThrow(), west)).isPresent();
-        assertThat(graph.findEdge(graph.findNode("GFW:atlantic:test:west").orElseThrow(), graph.findNode("GFW:atlantic:test:central").orElseThrow()))
-                .isPresent();
+        assertThat(graph.findNode(onlyNode.getId())).isPresent();
+        assertThat(graph.findNode("PANAMA_PACIFIC")).isEmpty();
+        assertThat(graph.getAdjacentEdges(onlyNode)).isEmpty();
     }
 
     @Test
-    void shouldKeepOffshorePacificBackboneConnected() {
+    void shouldConnectPortsToNearestNavigableAisNodes() {
         PortRepository portRepository = mock(PortRepository.class);
-        when(portRepository.findAll()).thenReturn(List.of());
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()),
-                new MaritimeCorridorOverlayProvider() {
-                    @Override
-                    public MaritimeCorridorOverlay currentOverlay() {
-                        return MaritimeCorridorOverlay.empty("STATIC");
-                    }
-
-                    @Override
-                    public MaritimeCorridorOverlay refreshOverlay() {
-                        return MaritimeCorridorOverlay.empty("STATIC");
-                    }
-                }
-        );
-
-        RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
-        MaritimeNode pacificTropicalEast = graph.findNode("PACIFIC_TROPICAL_EAST").orElseThrow();
-
-        assertThat(graph.findEdge(graph.findNode("PACIFIC_SOUTH_EAST").orElseThrow(), pacificTropicalEast)).isPresent();
-    }
-
-    @Test
-    void shouldExposeDetailedPanamaCanalChain() {
-        PortRepository portRepository = mock(PortRepository.class);
-        when(portRepository.findAll()).thenReturn(List.of());
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()),
-                new MaritimeCorridorOverlayProvider() {
-                    @Override
-                    public MaritimeCorridorOverlay currentOverlay() {
-                        return MaritimeCorridorOverlay.empty("STATIC");
-                    }
-
-                    @Override
-                    public MaritimeCorridorOverlay refreshOverlay() {
-                        return MaritimeCorridorOverlay.empty("STATIC");
-                    }
-                }
-        );
-
-        RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
-        MaritimeNode balboaInner = graph.findNode("PANAMA_BALBOA_INNER").orElseThrow();
-        MaritimeNode miraflores = graph.findNode("PANAMA_MIRAFLORES_LOCKS").orElseThrow();
-        MaritimeNode canalCenter = graph.findNode("PANAMA_CANAL").orElseThrow();
-        MaritimeNode colonInner = graph.findNode("PANAMA_COLON_INNER").orElseThrow();
-        MaritimeNode panamaCaribbeanOuter = graph.findNode("PANAMA_CARIBBEAN_OUTER").orElseThrow();
-        MaritimeNode caribbeanSouthWest = graph.findNode("CARIBBEAN_SW").orElseThrow();
-        MaritimeEdge gatunToColon = graph.findEdge(graph.findNode("PANAMA_GATUN_LOCKS").orElseThrow(), colonInner)
-                .orElseThrow();
-
-        assertThat(graph.findEdge(balboaInner, miraflores)).isPresent();
-        assertThat(graph.findEdge(canalCenter, colonInner)).isEmpty();
-        assertThat(gatunToColon.geometry()).isNotEmpty();
-        assertThat(graph.findEdge(graph.findNode("PANAMA_ATLANTIC").orElseThrow(), graph.findNode("PANAMA_CARIBBEAN_OUTER").orElseThrow()))
-                .isPresent();
-        assertThat(graph.findEdge(panamaCaribbeanOuter, caribbeanSouthWest)).isPresent();
-    }
-
-    @Test
-    void shouldNotConnectBalboaPortDirectlyToOverlayWhenCanalChainExists() {
-        PortRepository portRepository = mock(PortRepository.class);
-        PortDocument balboa = new PortDocument();
-        balboa.setId("BALBOA-ID");
-        balboa.setName("Balboa");
-        balboa.setContinent("America");
-        balboa.setDisabled(false);
-        balboa.setCoordinates(new PortDocument.CoordinatesDocument(8.939008, -79.555637));
-        when(portRepository.findAll()).thenReturn(List.of(balboa));
-
-        MaritimeNode overlayNode = MaritimeNode.seaNode(
-                "GFW:panama:test",
-                "GFW Panama Test",
-                MaritimeNodeType.SEA_WAYPOINT,
-                new Coordinates(7.7, -79.4)
-        );
-        MaritimeCorridorOverlayProvider overlayProvider = new MaritimeCorridorOverlayProvider() {
-            @Override
-            public MaritimeCorridorOverlay currentOverlay() {
-                return overlay();
-            }
-
-            @Override
-            public MaritimeCorridorOverlay refreshOverlay() {
-                return overlay();
-            }
-
-            private MaritimeCorridorOverlay overlay() {
-                return new MaritimeCorridorOverlay(
-                        "GLOBAL_FISHING_WATCH",
-                        Instant.now(),
-                        List.of(overlayNode),
-                        List.of(),
-                        List.of()
-                );
-            }
-        };
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()),
-                overlayProvider
-        );
-
-        RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
-        MaritimeNode balboaPort = graph.findPortNode("BALBOA-ID").orElseThrow();
-
-        assertThat(graph.findEdge(balboaPort, overlayNode)).isEmpty();
-        assertThat(graph.findEdge(balboaPort, graph.findNode("PANAMA_BALBOA_INNER").orElseThrow())).isPresent();
-    }
-
-    @Test
-    void shouldConnectCallaoDirectlyToPreferredAisOverlayWhenNoTrustedStaticConnectorExists() {
-        PortRepository portRepository = mock(PortRepository.class);
-        PortDocument callao = new PortDocument();
-        callao.setId("CALLAO-ID");
-        callao.setName("Callao");
-        callao.setContinent("America");
-        callao.setDisabled(false);
-        callao.setCoordinates(new PortDocument.CoordinatesDocument(-12.0564, -77.1319));
+        PortDocument callao = portDocument("CALLAO-ID", "Callao", -12.0564, -77.1319);
         when(portRepository.findAll()).thenReturn(List.of(callao));
 
-        MaritimeNode overlayNode = MaritimeNode.seaNode(
-                "GFW:peru-ecuador-coast:m11_20:m78_20",
-                "GFW Peru Ecuador Coastal Corridor -11.20, -78.20",
-                MaritimeNodeType.SEA_WAYPOINT,
-                new Coordinates(-11.2, -78.2)
+        MaritimeNode nearNode = overlayNode("GFW:peru:test:near", -12.30, -78.10);
+        MaritimeNode farNode = overlayNode("GFW:peru:test:far", -9.00, -85.00);
+        MaritimeCorridorOverlay overlay = overlayOf(
+                List.of(nearNode, farNode),
+                List.of(new MaritimeNetworkCatalog.EdgeDefinition(nearNode.getId(), farNode.getId(), false, false, false))
         );
-        MaritimeCorridorOverlayProvider overlayProvider = new MaritimeCorridorOverlayProvider() {
-            @Override
-            public MaritimeCorridorOverlay currentOverlay() {
-                return overlay();
-            }
 
-            @Override
-            public MaritimeCorridorOverlay refreshOverlay() {
-                return overlay();
-            }
-
-            private MaritimeCorridorOverlay overlay() {
-                return new MaritimeCorridorOverlay(
-                        "GLOBAL_FISHING_WATCH",
-                        Instant.now(),
-                        List.of(overlayNode),
-                        List.of(
-                                new MaritimeNetworkCatalog.EdgeDefinition("GFW:peru-ecuador-coast:m11_20:m78_20", "PACIFIC_SOUTH_EAST", false, false, false)
-                        ),
-                        List.of()
-                );
-            }
-        };
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()) {
-                    @Override
-                    public boolean crossesLand(List<Coordinates> path) {
-                        return false;
-                    }
-                },
-                overlayProvider
-        );
+        RouteGraphBuilder builder = builder(portRepository, alwaysWaterMask(), overlay);
 
         RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
         MaritimeNode callaoPort = graph.findPortNode("CALLAO-ID").orElseThrow();
 
-        assertThat(graph.findEdge(callaoPort, overlayNode)).isPresent();
-        assertThat(graph.findNode("PERU_APPROACH")).isPresent();
-        assertThat(graph.findEdge(callaoPort, graph.findNode("PERU_APPROACH").orElseThrow())).isEmpty();
+        assertThat(graph.findEdge(callaoPort, nearNode)).isPresent();
+        assertThat(graph.findEdge(callaoPort, farNode)).isPresent();
+    }
+
+    @Test
+    void shouldConnectNewYorkThroughCatalogConnectorWhenAisOverlayHasNoNearbyEastCoastCell() {
+        PortRepository portRepository = mock(PortRepository.class);
+        PortDocument newYork = portDocument("NEW-YORK-ID", "New York", 40.7128, -74.0060);
+        PortDocument callao = portDocument("CALLAO-ID", "Callao", -12.0564, -77.1319);
+        when(portRepository.findAll()).thenReturn(List.of(newYork, callao));
+
+        MaritimeNode oldAtlanticCell = overlayNode("GFW:atlantic-north-west:test", 29.0, -74.5);
+        MaritimeNode callaoApproach = overlayNode("GFW:peru-ecuador-coast:callao", -12.4, -78.4);
+        MaritimeCorridorOverlay overlay = overlayOf(
+                List.of(oldAtlanticCell, callaoApproach),
+                List.of(new MaritimeNetworkCatalog.EdgeDefinition(oldAtlanticCell.getId(), callaoApproach.getId(), false, false, false))
+        );
+
+        MaritimeLandMask mask = new MaritimeLandMask(new GeoUtils()) {
+            @Override
+            public boolean crossesLand(List<Coordinates> path) {
+                return path.stream().anyMatch(point -> point.equals(new Coordinates(40.7128, -74.0060)));
+            }
+
+            @Override
+            public boolean isOnLand(Coordinates coordinates) {
+                return false;
+            }
+        };
+        RouteGraphBuilder builder = builder(portRepository, mask, overlay);
+
+        RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
+        MaritimeNode newYorkPort = graph.findPortNode("NEW-YORK-ID").orElseThrow();
+        MaritimeNode eastCoastConnector = graph.findNode("US_EAST_COAST").orElseThrow();
+
+        assertThat(graph.findEdge(newYorkPort, oldAtlanticCell)).isEmpty();
+        assertThat(graph.findEdge(newYorkPort, eastCoastConnector)).isPresent();
+        assertThat(graph.findEdge(eastCoastConnector, graph.findNode("NORTH_ATLANTIC_WEST").orElseThrow())).isPresent();
+    }
+
+    @Test
+    void shouldNotUseCatalogBackboneWhenDisabled() {
+        PortRepository portRepository = mock(PortRepository.class);
+        PortDocument callao = portDocument("CALLAO-ID", "Callao", -12.0564, -77.1319);
+        when(portRepository.findAll()).thenReturn(List.of(callao));
+
+        MaritimeNode callaoAisCell = overlayNode("GFW:peru-ecuador-coast:callao", -12.30, -78.10);
+        MaritimeCorridorOverlay overlay = overlayOf(List.of(callaoAisCell), List.of());
+
+        RouteGraphBuilder builder = builder(portRepository, alwaysWaterMask(), overlay);
+        ReflectionTestUtils.setField(builder, "catalogBackboneEnabled", false);
+
+        RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
+        MaritimeNode callaoPort = graph.findPortNode("CALLAO-ID").orElseThrow();
+
+        assertThat(graph.findNode("PERU_APPROACH")).isEmpty();
+        assertThat(graph.findEdge(callaoPort, callaoAisCell)).isPresent();
+    }
+
+    @Test
+    void shouldUseCatalogBackboneWithoutBlockingOnAisRefreshWhenOverlayIsEmpty() {
+        PortRepository portRepository = mock(PortRepository.class);
+        PortDocument gotoPort = portDocument("GOTO-ID", "Goto", 32.6953, 128.8419);
+        gotoPort.setContinent("Asia");
+        PortDocument shanghai = portDocument("SHANGHAI-ID", "Shanghai", 31.2304, 121.4737);
+        shanghai.setContinent("Asia");
+        when(portRepository.findAll()).thenReturn(List.of(gotoPort, shanghai));
+
+        AtomicInteger refreshCalls = new AtomicInteger();
+        MaritimeCorridorOverlay emptyOverlay = MaritimeCorridorOverlay.empty("GLOBAL_FISHING_WATCH");
+        RouteGraphBuilder builder = new RouteGraphBuilder(
+                portRepository,
+                new PortMapper(),
+                new MaritimeNetworkCatalog(),
+                new GeoUtils(),
+                alwaysWaterMask(),
+                new MaritimeCorridorOverlayProvider() {
+                    @Override
+                    public MaritimeCorridorOverlay currentOverlay() {
+                        return emptyOverlay;
+                    }
+
+                    @Override
+                    public MaritimeCorridorOverlay refreshOverlay() {
+                        refreshCalls.incrementAndGet();
+                        return emptyOverlay;
+                    }
+                }
+        );
+
+        RouteGraph graph = builder.buildDynamicRouteGraphForPorts(Set.of(), Set.of("GOTO-ID", "SHANGHAI-ID"));
+        MaritimeNode gotoNode = graph.findPortNode("GOTO-ID").orElseThrow();
+        MaritimeNode shanghaiNode = graph.findPortNode("SHANGHAI-ID").orElseThrow();
+
+        assertThat(refreshCalls).hasValue(0);
+        assertThat(graph.findEdge(gotoNode, graph.findNode("JAPAN_EAST_APPROACH").orElseThrow())).isPresent();
+        assertThat(graph.findEdge(shanghaiNode, graph.findNode("EAST_CHINA_SEA_COAST").orElseThrow())).isPresent();
+    }
+
+    @Test
+    void shouldSkipPortConnectionsThatCrossLand() {
+        PortRepository portRepository = mock(PortRepository.class);
+        PortDocument callao = portDocument("CALLAO-ID", "Callao", -12.0564, -77.1319);
+        when(portRepository.findAll()).thenReturn(List.of(callao));
+
+        MaritimeNode blockedNode = overlayNode("GFW:peru:test:blocked", -11.8, -76.9);
+        MaritimeNode safeNode = overlayNode("GFW:peru:test:safe", -12.4, -78.4);
+        MaritimeCorridorOverlay overlay = overlayOf(List.of(blockedNode, safeNode), List.of());
+
+        MaritimeLandMask mask = new MaritimeLandMask(new GeoUtils()) {
+            @Override
+            public boolean crossesLand(List<Coordinates> path) {
+                return path.contains(blockedNode.getCoordinates());
+            }
+        };
+
+        RouteGraphBuilder builder = builder(portRepository, mask, overlay);
+
+        RouteGraph graph = builder.buildDynamicRouteGraph(Set.of());
+        MaritimeNode callaoPort = graph.findPortNode("CALLAO-ID").orElseThrow();
+
+        assertThat(graph.findEdge(callaoPort, blockedNode)).isEmpty();
+        assertThat(graph.findEdge(callaoPort, safeNode)).isPresent();
     }
 
     @Test
     void shouldReuseCachedDynamicGraphWhenPortsAndOverlayDoNotChange() {
         PortRepository portRepository = mock(PortRepository.class);
-        PortDocument callao = new PortDocument();
-        callao.setId("CALLAO-ID");
-        callao.setName("Callao");
-        callao.setContinent("America");
-        callao.setDisabled(false);
-        callao.setCoordinates(new PortDocument.CoordinatesDocument(-12.051012, -77.154106));
+        PortDocument callao = portDocument("CALLAO-ID", "Callao", -12.051012, -77.154106);
         when(portRepository.findAll()).thenReturn(List.of(callao));
 
-        Instant refreshedAt = Instant.parse("2026-04-20T14:00:00Z");
-        MaritimeNode overlayNode = MaritimeNode.seaNode(
-                "GFW:peru-ecuador-coast:m12_00:m77_20",
-                "GFW Peru Corridor",
-                MaritimeNodeType.SEA_WAYPOINT,
-                new Coordinates(-12.0, -77.2)
-        );
+        MaritimeNode overlayNode = overlayNode("GFW:peru:test:cache", -12.30, -78.10);
         MaritimeCorridorOverlay overlay = new MaritimeCorridorOverlay(
                 "GLOBAL_FISHING_WATCH",
-                refreshedAt,
+                Instant.parse("2026-04-20T14:00:00Z"),
                 List.of(overlayNode),
                 List.of(),
                 List.of()
         );
-        MaritimeCorridorOverlayProvider overlayProvider = new MaritimeCorridorOverlayProvider() {
-            @Override
-            public MaritimeCorridorOverlay currentOverlay() {
-                return overlay;
-            }
 
-            @Override
-            public MaritimeCorridorOverlay refreshOverlay() {
-                return overlay;
-            }
-        };
-
-        RouteGraphBuilder builder = new RouteGraphBuilder(
-                portRepository,
-                new PortMapper(),
-                new MaritimeNetworkCatalog(),
-                new GeoUtils(),
-                new MaritimeLandMask(new GeoUtils()) {
-                    @Override
-                    public boolean crossesLand(List<Coordinates> path) {
-                        return false;
-                    }
-                },
-                overlayProvider
-        );
+        RouteGraphBuilder builder = builder(portRepository, alwaysWaterMask(), overlay);
 
         RouteGraph firstGraph = builder.buildDynamicRouteGraph(Set.of());
         RouteGraph secondGraph = builder.buildDynamicRouteGraph(Set.of());
 
         assertThat(secondGraph).isSameAs(firstGraph);
         verify(portRepository, times(2)).findAll();
+    }
+
+    private RouteGraphBuilder builder(PortRepository portRepository,
+                                      MaritimeLandMask landMask,
+                                      MaritimeCorridorOverlay overlay) {
+        return new RouteGraphBuilder(
+                portRepository,
+                new PortMapper(),
+                new MaritimeNetworkCatalog(),
+                new GeoUtils(),
+                landMask,
+                overlayProvider(overlay)
+        );
+    }
+
+    private MaritimeCorridorOverlayProvider overlayProvider(MaritimeCorridorOverlay overlay) {
+        return new MaritimeCorridorOverlayProvider() {
+            @Override
+            public MaritimeCorridorOverlay currentOverlay() {
+                return overlay;
+            }
+
+            @Override
+            public MaritimeCorridorOverlay refreshOverlay() {
+                return overlay;
+            }
+        };
+    }
+
+    private MaritimeLandMask alwaysWaterMask() {
+        return new MaritimeLandMask(new GeoUtils()) {
+            @Override
+            public boolean crossesLand(List<Coordinates> path) {
+                return false;
+            }
+        };
+    }
+
+    private MaritimeCorridorOverlay overlayOf(List<MaritimeNode> nodes,
+                                              List<MaritimeNetworkCatalog.EdgeDefinition> edges) {
+        return new MaritimeCorridorOverlay(
+                "GLOBAL_FISHING_WATCH",
+                Instant.parse("2026-04-21T10:00:00Z"),
+                nodes,
+                edges,
+                List.of()
+        );
+    }
+
+    private MaritimeNode overlayNode(String id, double latitude, double longitude) {
+        return MaritimeNode.seaNode(id, id, MaritimeNodeType.SEA_WAYPOINT, new Coordinates(latitude, longitude));
+    }
+
+    private PortDocument portDocument(String id, String name, double latitude, double longitude) {
+        PortDocument document = new PortDocument();
+        document.setId(id);
+        document.setName(name);
+        document.setContinent("America");
+        document.setDisabled(false);
+        document.setCoordinates(new PortDocument.CoordinatesDocument(latitude, longitude));
+        return document;
     }
 }

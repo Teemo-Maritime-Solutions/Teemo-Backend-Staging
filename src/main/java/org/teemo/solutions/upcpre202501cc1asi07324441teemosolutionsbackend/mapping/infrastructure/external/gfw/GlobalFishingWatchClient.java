@@ -12,6 +12,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriBuilder;
 import reactor.core.publisher.Mono;
@@ -52,10 +53,15 @@ public class GlobalFishingWatchClient {
         this.objectMapper = objectMapper;
         this.pollInterval = pollInterval == null || pollInterval.isNegative() ? Duration.ZERO : pollInterval;
         this.pollDelay = pollDelay;
+        int maxInMemorySizeBytes = properties.getResponseBufferMb() * 1024 * 1024;
+        ExchangeStrategies exchangeStrategies = ExchangeStrategies.builder()
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(maxInMemorySizeBytes))
+                .build();
         this.webClient = webClient.mutate()
                 .baseUrl(properties.getBaseUrl())
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getApiToken())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .exchangeStrategies(exchangeStrategies)
                 .build();
     }
 
@@ -175,6 +181,18 @@ public class GlobalFishingWatchClient {
     }
 
     private RawHttpResponse submitReport(GlobalFishingWatchProperties.RegionProperties region) {
+        logger.info("gfw.report.request region={} dataset={} dateRange={},{} spatialResolution={} temporalResolution={} groupBy=FLAG vesselTypes={} bbox=[{},{},{},{}]",
+                region.getId(),
+                DATASET,
+                properties.getStartDate(),
+                properties.getEndDate(),
+                properties.getSpatialResolution(),
+                properties.getTemporalResolution(),
+                properties.getVesselTypes(),
+                region.getMinLon(),
+                region.getMinLat(),
+                region.getMaxLon(),
+                region.getMaxLat());
         return webClient.post()
                 .uri(uriBuilder -> buildReportUri(uriBuilder, properties.getStartDate(), properties.getEndDate()))
                 .bodyValue(GeoJsonReportBody.forBoundingBox(region))
