@@ -1,0 +1,15 @@
+{
+  "sample_vessels": 64,
+  "max_cases": 20,
+  "max_gap_seconds": 600,
+  "max_jump_m": 50000,
+  "min_track_distance_m": 20000,
+  "max_track_distance_m": 200000,
+  "max_track_points": 1500,
+  "connector_radius_m": 20000,
+  "connector_candidates": 24,
+  "metric_step_m": 1000,
+  "max_metric_samples": 3000,
+  "max_csv_rows": 20000000,
+  "max_selected_records": 500000
+}

@@ -1,0 +1,36 @@
+{
+  "expectedRuleVersion": "INCOTERMS_2020_RESEARCH_1",
+  "acknowledgeResearchLimitations": true,
+  "term": "CIF",
+  "mode": "SEA_INLAND_WATERWAY",
+  "saleContractReference": "SYNTHETIC-SALE-001",
+  "namedEventId": "destination-ready",
+  "deliveryEventId": "on-board",
+  "currency": "USD",
+  "events": [
+    {"id": "alongside", "type": "ALONGSIDE_VESSEL", "place": "Synthetic origin port, vessel berth A"},
+    {"id": "on-board", "type": "ON_BOARD_VESSEL", "place": "Synthetic origin port, aboard nominated vessel"},
+    {"id": "destination-ready", "type": "DESTINATION_READY_FOR_UNLOADING", "place": "Synthetic destination port, berth B"},
+    {"id": "destination-unloaded", "type": "DESTINATION_UNLOADED", "place": "Synthetic destination port, berth B"}
+  ],
+  "legs": [
+    {"id": "loading", "fromEventId": "alongside", "toEventId": "on-board", "routingControl": "UNKNOWN", "controlEvidence": null},
+    {"id": "ocean", "fromEventId": "on-board", "toEventId": "destination-ready", "routingControl": "CARRIER", "controlEvidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic carriage: carrier chooses ocean route"}},
+    {"id": "unloading", "fromEventId": "destination-ready", "toEventId": "destination-unloaded", "routingControl": "UNKNOWN", "controlEvidence": null}
+  ],
+  "carriage": {"contractReference": "SYNTHETIC-CARRIAGE-001", "destinationUnloadingIncluded": false},
+  "cargo": {"description": "Synthetic cargo; declared sale price, not a market quote", "saleValue": 100000.00, "valueEvidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic sale price"}},
+  "fees": [
+    {"id": "pack", "kind": "CHECK_PACK_MARK", "amount": 100.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic packing charge"}},
+    {"id": "export", "kind": "EXPORT_CLEARANCE", "amount": 200.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic export charge"}},
+    {"id": "transit", "kind": "TRANSIT_CLEARANCE", "amount": 0.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "No transit clearance in this declared scenario"}},
+    {"id": "import", "kind": "IMPORT_CLEARANCE_DUTY_TAX", "amount": 700.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic aggregate import charge, not a tax rate"}},
+    {"id": "load", "kind": "TRANSPORT", "legId": "loading", "amount": 300.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic loading charge"}},
+    {"id": "freight", "kind": "TRANSPORT", "legId": "ocean", "amount": 4000.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic ocean charge excluding separately itemised costs"}},
+    {"id": "unload", "kind": "DESTINATION_UNLOADING", "amount": 500.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic unloading charge"}},
+    {"id": "insurance", "kind": "INSURANCE", "amount": 150.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Synthetic premium; no actual policy"}}
+  ],
+  "lossScenarios": [
+    {"id": "ocean-damage", "legId": "ocean", "damageFraction": 0.10, "buyerAdditionalLoss": 250.00, "sellerAdditionalLoss": 0.00, "evidence": {"kind": "USER_DECLARED_SCENARIO", "reference": "Hypothetical 10 percent cargo loss plus buyer expense; no probability"}}
+  ]
+}

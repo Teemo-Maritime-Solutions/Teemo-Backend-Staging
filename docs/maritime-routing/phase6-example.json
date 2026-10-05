@@ -1,0 +1,658 @@
+{
+  "expectedModelVersion": "JOINT_DISCRETE_RESEARCH_1",
+  "acknowledgeUncalibratedProbabilities": true,
+  "seed": 20260922,
+  "samples": 20000,
+  "tailAlpha": 0.95,
+  "confidenceLevel": 0.95,
+  "alternatives": [
+    {
+      "id": "economy",
+      "contract": {
+        "expectedRuleVersion": "INCOTERMS_2020_RESEARCH_1",
+        "acknowledgeResearchLimitations": true,
+        "term": "CIF",
+        "mode": "SEA_INLAND_WATERWAY",
+        "saleContractReference": "SYNTHETIC-SALE-SAME-CARGO-economy",
+        "namedEventId": "destination-ready",
+        "deliveryEventId": "on-board",
+        "currency": "USD",
+        "events": [
+          {
+            "id": "alongside",
+            "type": "ALONGSIDE_VESSEL",
+            "place": "Synthetic origin port, vessel berth A"
+          },
+          {
+            "id": "on-board",
+            "type": "ON_BOARD_VESSEL",
+            "place": "Synthetic origin port, aboard nominated vessel"
+          },
+          {
+            "id": "destination-ready",
+            "type": "DESTINATION_READY_FOR_UNLOADING",
+            "place": "Synthetic destination port, berth B"
+          },
+          {
+            "id": "destination-unloaded",
+            "type": "DESTINATION_UNLOADED",
+            "place": "Synthetic destination port, berth B"
+          }
+        ],
+        "legs": [
+          {
+            "id": "loading",
+            "fromEventId": "alongside",
+            "toEventId": "on-board",
+            "routingControl": "UNKNOWN",
+            "controlEvidence": null
+          },
+          {
+            "id": "ocean",
+            "fromEventId": "on-board",
+            "toEventId": "destination-ready",
+            "routingControl": "CARRIER",
+            "controlEvidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic carriage: carrier chooses ocean route"
+            }
+          },
+          {
+            "id": "unloading",
+            "fromEventId": "destination-ready",
+            "toEventId": "destination-unloaded",
+            "routingControl": "UNKNOWN",
+            "controlEvidence": null
+          }
+        ],
+        "carriage": {
+          "contractReference": "SYNTHETIC-CARRIAGE-economy",
+          "destinationUnloadingIncluded": false
+        },
+        "cargo": {
+          "description": "Synthetic cargo; declared sale price, not a market quote",
+          "saleValue": 100000.0,
+          "valueEvidence": {
+            "kind": "USER_DECLARED_SCENARIO",
+            "reference": "Synthetic sale price"
+          }
+        },
+        "fees": [
+          {
+            "id": "pack",
+            "kind": "CHECK_PACK_MARK",
+            "amount": 100.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic packing charge"
+            }
+          },
+          {
+            "id": "export",
+            "kind": "EXPORT_CLEARANCE",
+            "amount": 200.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic export charge"
+            }
+          },
+          {
+            "id": "transit",
+            "kind": "TRANSIT_CLEARANCE",
+            "amount": 0.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "No transit clearance in this declared scenario"
+            }
+          },
+          {
+            "id": "import",
+            "kind": "IMPORT_CLEARANCE_DUTY_TAX",
+            "amount": 700.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic aggregate import charge, not a tax rate"
+            }
+          },
+          {
+            "id": "load",
+            "kind": "TRANSPORT",
+            "legId": "loading",
+            "amount": 300.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic loading charge"
+            }
+          },
+          {
+            "id": "freight",
+            "kind": "TRANSPORT",
+            "legId": "ocean",
+            "amount": 4000.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic ocean charge excluding separately itemised costs"
+            }
+          },
+          {
+            "id": "unload",
+            "kind": "DESTINATION_UNLOADING",
+            "amount": 500.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic unloading charge"
+            }
+          },
+          {
+            "id": "insurance",
+            "kind": "INSURANCE",
+            "amount": 150.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic premium; no actual policy"
+            }
+          }
+        ],
+        "lossScenarios": [
+          {
+            "id": "normal",
+            "legId": "ocean",
+            "damageFraction": 0,
+            "buyerAdditionalLoss": 0,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: economy/normal"
+            }
+          },
+          {
+            "id": "delay",
+            "legId": "ocean",
+            "damageFraction": 0.01,
+            "buyerAdditionalLoss": 250,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: economy/delay"
+            }
+          },
+          {
+            "id": "storm",
+            "legId": "ocean",
+            "damageFraction": 0.1,
+            "buyerAdditionalLoss": 1000,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: economy/storm"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "protected",
+      "contract": {
+        "expectedRuleVersion": "INCOTERMS_2020_RESEARCH_1",
+        "acknowledgeResearchLimitations": true,
+        "term": "CIF",
+        "mode": "SEA_INLAND_WATERWAY",
+        "saleContractReference": "SYNTHETIC-SALE-SAME-CARGO-protected",
+        "namedEventId": "destination-ready",
+        "deliveryEventId": "on-board",
+        "currency": "USD",
+        "events": [
+          {
+            "id": "alongside",
+            "type": "ALONGSIDE_VESSEL",
+            "place": "Synthetic origin port, vessel berth A"
+          },
+          {
+            "id": "on-board",
+            "type": "ON_BOARD_VESSEL",
+            "place": "Synthetic origin port, aboard nominated vessel"
+          },
+          {
+            "id": "destination-ready",
+            "type": "DESTINATION_READY_FOR_UNLOADING",
+            "place": "Synthetic destination port, berth B"
+          },
+          {
+            "id": "destination-unloaded",
+            "type": "DESTINATION_UNLOADED",
+            "place": "Synthetic destination port, berth B"
+          }
+        ],
+        "legs": [
+          {
+            "id": "loading",
+            "fromEventId": "alongside",
+            "toEventId": "on-board",
+            "routingControl": "UNKNOWN",
+            "controlEvidence": null
+          },
+          {
+            "id": "ocean",
+            "fromEventId": "on-board",
+            "toEventId": "destination-ready",
+            "routingControl": "CARRIER",
+            "controlEvidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic carriage: carrier chooses ocean route"
+            }
+          },
+          {
+            "id": "unloading",
+            "fromEventId": "destination-ready",
+            "toEventId": "destination-unloaded",
+            "routingControl": "UNKNOWN",
+            "controlEvidence": null
+          }
+        ],
+        "carriage": {
+          "contractReference": "SYNTHETIC-CARRIAGE-protected",
+          "destinationUnloadingIncluded": false
+        },
+        "cargo": {
+          "description": "Synthetic cargo; declared sale price, not a market quote",
+          "saleValue": 100000.0,
+          "valueEvidence": {
+            "kind": "USER_DECLARED_SCENARIO",
+            "reference": "Synthetic sale price"
+          }
+        },
+        "fees": [
+          {
+            "id": "pack",
+            "kind": "CHECK_PACK_MARK",
+            "amount": 100.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic packing charge"
+            }
+          },
+          {
+            "id": "export",
+            "kind": "EXPORT_CLEARANCE",
+            "amount": 200.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic export charge"
+            }
+          },
+          {
+            "id": "transit",
+            "kind": "TRANSIT_CLEARANCE",
+            "amount": 0.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "No transit clearance in this declared scenario"
+            }
+          },
+          {
+            "id": "import",
+            "kind": "IMPORT_CLEARANCE_DUTY_TAX",
+            "amount": 700.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic aggregate import charge, not a tax rate"
+            }
+          },
+          {
+            "id": "load",
+            "kind": "TRANSPORT",
+            "legId": "loading",
+            "amount": 300.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic loading charge"
+            }
+          },
+          {
+            "id": "freight",
+            "kind": "TRANSPORT",
+            "legId": "ocean",
+            "amount": 4000.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic ocean charge excluding separately itemised costs"
+            }
+          },
+          {
+            "id": "unload",
+            "kind": "DESTINATION_UNLOADING",
+            "amount": 500.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic unloading charge"
+            }
+          },
+          {
+            "id": "insurance",
+            "kind": "INSURANCE",
+            "amount": 150.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic premium; no actual policy"
+            }
+          },
+          {
+            "id": "declared-buyer-service",
+            "kind": "OTHER_AGREED",
+            "amount": 500,
+            "agreedPayer": "BUYER",
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic buyer service charge; not an insurance policy"
+            }
+          }
+        ],
+        "lossScenarios": [
+          {
+            "id": "normal",
+            "legId": "ocean",
+            "damageFraction": 0,
+            "buyerAdditionalLoss": 0,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: protected/normal"
+            }
+          },
+          {
+            "id": "delay",
+            "legId": "ocean",
+            "damageFraction": 0,
+            "buyerAdditionalLoss": 250,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: protected/delay"
+            }
+          },
+          {
+            "id": "storm",
+            "legId": "ocean",
+            "damageFraction": 0.02,
+            "buyerAdditionalLoss": 1000,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: protected/storm"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dominated",
+      "contract": {
+        "expectedRuleVersion": "INCOTERMS_2020_RESEARCH_1",
+        "acknowledgeResearchLimitations": true,
+        "term": "CIF",
+        "mode": "SEA_INLAND_WATERWAY",
+        "saleContractReference": "SYNTHETIC-SALE-SAME-CARGO-dominated",
+        "namedEventId": "destination-ready",
+        "deliveryEventId": "on-board",
+        "currency": "USD",
+        "events": [
+          {
+            "id": "alongside",
+            "type": "ALONGSIDE_VESSEL",
+            "place": "Synthetic origin port, vessel berth A"
+          },
+          {
+            "id": "on-board",
+            "type": "ON_BOARD_VESSEL",
+            "place": "Synthetic origin port, aboard nominated vessel"
+          },
+          {
+            "id": "destination-ready",
+            "type": "DESTINATION_READY_FOR_UNLOADING",
+            "place": "Synthetic destination port, berth B"
+          },
+          {
+            "id": "destination-unloaded",
+            "type": "DESTINATION_UNLOADED",
+            "place": "Synthetic destination port, berth B"
+          }
+        ],
+        "legs": [
+          {
+            "id": "loading",
+            "fromEventId": "alongside",
+            "toEventId": "on-board",
+            "routingControl": "UNKNOWN",
+            "controlEvidence": null
+          },
+          {
+            "id": "ocean",
+            "fromEventId": "on-board",
+            "toEventId": "destination-ready",
+            "routingControl": "CARRIER",
+            "controlEvidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic carriage: carrier chooses ocean route"
+            }
+          },
+          {
+            "id": "unloading",
+            "fromEventId": "destination-ready",
+            "toEventId": "destination-unloaded",
+            "routingControl": "UNKNOWN",
+            "controlEvidence": null
+          }
+        ],
+        "carriage": {
+          "contractReference": "SYNTHETIC-CARRIAGE-dominated",
+          "destinationUnloadingIncluded": false
+        },
+        "cargo": {
+          "description": "Synthetic cargo; declared sale price, not a market quote",
+          "saleValue": 100000.0,
+          "valueEvidence": {
+            "kind": "USER_DECLARED_SCENARIO",
+            "reference": "Synthetic sale price"
+          }
+        },
+        "fees": [
+          {
+            "id": "pack",
+            "kind": "CHECK_PACK_MARK",
+            "amount": 100.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic packing charge"
+            }
+          },
+          {
+            "id": "export",
+            "kind": "EXPORT_CLEARANCE",
+            "amount": 200.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic export charge"
+            }
+          },
+          {
+            "id": "transit",
+            "kind": "TRANSIT_CLEARANCE",
+            "amount": 0.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "No transit clearance in this declared scenario"
+            }
+          },
+          {
+            "id": "import",
+            "kind": "IMPORT_CLEARANCE_DUTY_TAX",
+            "amount": 700.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic aggregate import charge, not a tax rate"
+            }
+          },
+          {
+            "id": "load",
+            "kind": "TRANSPORT",
+            "legId": "loading",
+            "amount": 300.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic loading charge"
+            }
+          },
+          {
+            "id": "freight",
+            "kind": "TRANSPORT",
+            "legId": "ocean",
+            "amount": 4000.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic ocean charge excluding separately itemised costs"
+            }
+          },
+          {
+            "id": "unload",
+            "kind": "DESTINATION_UNLOADING",
+            "amount": 500.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic unloading charge"
+            }
+          },
+          {
+            "id": "insurance",
+            "kind": "INSURANCE",
+            "amount": 150.0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic premium; no actual policy"
+            }
+          },
+          {
+            "id": "declared-buyer-service",
+            "kind": "OTHER_AGREED",
+            "amount": 200,
+            "agreedPayer": "BUYER",
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic buyer service charge; not an insurance policy"
+            }
+          }
+        ],
+        "lossScenarios": [
+          {
+            "id": "normal",
+            "legId": "ocean",
+            "damageFraction": 0,
+            "buyerAdditionalLoss": 0,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: dominated/normal"
+            }
+          },
+          {
+            "id": "delay",
+            "legId": "ocean",
+            "damageFraction": 0.01,
+            "buyerAdditionalLoss": 250,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: dominated/delay"
+            }
+          },
+          {
+            "id": "storm",
+            "legId": "ocean",
+            "damageFraction": 0.1,
+            "buyerAdditionalLoss": 1000,
+            "sellerAdditionalLoss": 0,
+            "evidence": {
+              "kind": "USER_DECLARED_SCENARIO",
+              "reference": "Synthetic conditional cargo/expense outcome: dominated/storm"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "distribution": {
+    "version": "SYNTHETIC-JOINT-001",
+    "evidenceReference": "User-authorized research example; all probabilities and losses are illustrative",
+    "dependenceDescription": "The same hypothetical weather state jointly changes duration and damage in every alternative; rows are never independently combined",
+    "applicability": "One hypothetical shipment, same cargo and currency; no claim of route, port, forecast or policy validation",
+    "scenarios": [
+      {
+        "id": "normal",
+        "probability": 0.9,
+        "outcomes": {
+          "economy": {
+            "lossScenarioId": "normal",
+            "durationHours": 48
+          },
+          "protected": {
+            "lossScenarioId": "normal",
+            "durationHours": 52
+          },
+          "dominated": {
+            "lossScenarioId": "normal",
+            "durationHours": 48
+          }
+        }
+      },
+      {
+        "id": "delay",
+        "probability": 0.08,
+        "outcomes": {
+          "economy": {
+            "lossScenarioId": "delay",
+            "durationHours": 72
+          },
+          "protected": {
+            "lossScenarioId": "delay",
+            "durationHours": 64
+          },
+          "dominated": {
+            "lossScenarioId": "delay",
+            "durationHours": 72
+          }
+        }
+      },
+      {
+        "id": "storm",
+        "probability": 0.02,
+        "outcomes": {
+          "economy": {
+            "lossScenarioId": "storm",
+            "durationHours": 120
+          },
+          "protected": {
+            "lossScenarioId": "storm",
+            "durationHours": 88
+          },
+          "dominated": {
+            "lossScenarioId": "storm",
+            "durationHours": 120
+          }
+        }
+      }
+    ]
+  },
+  "objectives": [
+    {
+      "dimension": "BUYER_TOTAL_COST",
+      "statistic": "MEAN"
+    },
+    {
+      "dimension": "BUYER_TOTAL_COST",
+      "statistic": "CVAR"
+    },
+    {
+      "dimension": "DURATION_HOURS",
+      "statistic": "MEAN"
+    }
+  ]
+}

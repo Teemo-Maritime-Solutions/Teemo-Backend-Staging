@@ -1,0 +1,12 @@
+{
+  "h3_resolution": 10,
+  "geodesic_step_m": 25,
+  "geometry_tolerance_m": 1,
+  "coastal_buffer_m": 0,
+  "max_connector_m": 500,
+  "connector_candidates": 24,
+  "connections_per_endpoint": 3,
+  "max_nodes": 100000,
+  "max_extent_degrees": 2,
+  "water_model": "S57_GROUP1_V2"
+}

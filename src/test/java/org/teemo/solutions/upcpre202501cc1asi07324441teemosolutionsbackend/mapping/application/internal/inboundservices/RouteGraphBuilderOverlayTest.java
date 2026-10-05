@@ -89,7 +89,7 @@ class RouteGraphBuilderOverlayTest {
     }
 
     @Test
-    void shouldConnectNewYorkThroughCatalogConnectorWhenAisOverlayHasNoNearbyEastCoastCell() {
+    void shouldRejectCatalogConnectorWhenPortAccessCrossesLand() {
         PortRepository portRepository = mock(PortRepository.class);
         PortDocument newYork = portDocument("NEW-YORK-ID", "New York", 40.7128, -74.0060);
         PortDocument callao = portDocument("CALLAO-ID", "Callao", -12.0564, -77.1319);
@@ -120,7 +120,7 @@ class RouteGraphBuilderOverlayTest {
         MaritimeNode eastCoastConnector = graph.findNode("US_EAST_COAST").orElseThrow();
 
         assertThat(graph.findEdge(newYorkPort, oldAtlanticCell)).isEmpty();
-        assertThat(graph.findEdge(newYorkPort, eastCoastConnector)).isPresent();
+        assertThat(graph.findEdge(newYorkPort, eastCoastConnector)).isEmpty();
         assertThat(graph.findEdge(eastCoastConnector, graph.findNode("NORTH_ATLANTIC_WEST").orElseThrow())).isPresent();
     }
 
@@ -179,7 +179,8 @@ class RouteGraphBuilderOverlayTest {
         MaritimeNode shanghaiNode = graph.findPortNode("SHANGHAI-ID").orElseThrow();
 
         assertThat(refreshCalls).hasValue(0);
-        assertThat(graph.findEdge(gotoNode, graph.findNode("JAPAN_EAST_APPROACH").orElseThrow())).isPresent();
+        // The old connector exceeded the now-enforced radius; no unbounded shortcut.
+        assertThat(graph.findEdge(gotoNode, graph.findNode("JAPAN_EAST_APPROACH").orElseThrow())).isEmpty();
         assertThat(graph.findEdge(shanghaiNode, graph.findNode("EAST_CHINA_SEA_COAST").orElseThrow())).isPresent();
     }
 
@@ -198,6 +199,9 @@ class RouteGraphBuilderOverlayTest {
             public boolean crossesLand(List<Coordinates> path) {
                 return path.contains(blockedNode.getCoordinates());
             }
+
+            @Override
+            public boolean isOnLand(Coordinates point) { return false; } // Synthetic mask fixture.
         };
 
         RouteGraphBuilder builder = builder(portRepository, mask, overlay);
@@ -262,6 +266,8 @@ class RouteGraphBuilderOverlayTest {
 
     private MaritimeLandMask alwaysWaterMask() {
         return new MaritimeLandMask(new GeoUtils()) {
+            @Override
+            public boolean isOnLand(Coordinates point) { return false; } // Synthetic mask fixture.
             @Override
             public boolean crossesLand(List<Coordinates> path) {
                 return false;

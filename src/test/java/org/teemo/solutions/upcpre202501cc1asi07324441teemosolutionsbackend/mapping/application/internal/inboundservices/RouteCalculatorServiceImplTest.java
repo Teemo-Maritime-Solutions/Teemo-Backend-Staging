@@ -70,7 +70,7 @@ class RouteCalculatorServiceImplTest {
     }
 
     @Test
-    void shouldSynthesizeMissingSegmentGeometryWhenGraphEdgeIsUnavailable() {
+    void shouldFailExplicitlyWhenGraphEdgeIsUnavailable() {
         AStarPathfinder pathfinder = mock(AStarPathfinder.class);
         RouteGraphBuilder graphBuilder = mock(RouteGraphBuilder.class);
         GeoUtils geoUtils = new GeoUtils();
@@ -97,15 +97,10 @@ class RouteCalculatorServiceImplTest {
         when(pathfinder.findOptimalRoute(any(), any(), eq(graph)))
                 .thenReturn(List.of(startNode, waypoint, endNode));
 
-        RoutePath routePath = service.calculateOptimalRoute(tokyo, honolulu, Set.of());
-
-        assertThat(routePath.geometry()).containsExactly(
-                tokyo.getCoordinates(),
-                waypoint.getCoordinates(),
-                honolulu.getCoordinates()
-        );
-        assertThat(routePath.totalDistanceNm()).isGreaterThan(0.0);
-        assertThat(routePath.estimatedHours()).isGreaterThan(0.0);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                service.calculateOptimalRoute(tokyo, honolulu, Set.of()))
+                .isInstanceOf(org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapping.domain.model.exceptions.RouteNotFoundException.class)
+                .hasMessageContaining("falta una arista validada");
     }
 
     private MaritimeNode seaNode(String id, double latitude, double longitude) {

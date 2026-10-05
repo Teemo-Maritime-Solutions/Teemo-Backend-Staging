@@ -1,0 +1,9 @@
+# Offline builder only. Runtime remains Java; do not install into a shared venv.
+h3==4.2.1
+shapely==2.1.1
+pyproj==3.7.1
+pyshp==2.3.1
+numpy==2.2.6
+scipy==1.15.3
+certifi==2026.7.22
+zstandard==0.24.0

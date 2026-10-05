@@ -184,6 +184,7 @@ public class RouteGraphBuilder {
 
     private void addCatalogBackbone(RouteGraph graph, Map<String, MaritimeNode> nodesById) {
         for (MaritimeNode node : networkCatalog.coreNodes()) {
+            if (landMask.isOnLand(node.getCoordinates())) continue;
             graph.addNode(node);
             nodesById.putIfAbsent(node.getId(), node);
         }
@@ -318,7 +319,9 @@ public class RouteGraphBuilder {
         List<Coordinates> geometry = edgeDefinition.geometry().isEmpty()
                 ? List.of(fromNode.getCoordinates(), toNode.getCoordinates())
                 : edgeDefinition.geometry();
-        if (validateLandCrossing && !edgeDefinition.canal() && landMask.crossesLand(geometry)) {
+        // A canal flag and upstream AIS provenance are not exemptions from geometry checks.
+        if (landMask.isOnLand(fromNode.getCoordinates()) || landMask.isOnLand(toNode.getCoordinates())
+                || landMask.crossesLand(geometry)) {
             return;
         }
 
@@ -357,21 +360,15 @@ public class RouteGraphBuilder {
     }
 
     private boolean isNavigablePortAccess(Coordinates portCoordinates, Coordinates overlayCoordinates, double distanceNm) {
-        if (distanceNm <= MAX_DIRECT_PORT_OVERLAY_DISTANCE_NM && isNavigable(portCoordinates, overlayCoordinates)) {
-            return true;
-        }
-
-        // Some seeded ports use city-center coordinates instead of terminal or harbor coordinates.
-        // For the short port-access leg, accept a nearby AIS cell when the AIS endpoint is offshore.
-        return distanceNm <= 220.0 && !landMask.isOnLand(overlayCoordinates);
+        return distanceNm <= MAX_DIRECT_PORT_OVERLAY_DISTANCE_NM
+                && !landMask.isOnLand(portCoordinates) && !landMask.isOnLand(overlayCoordinates)
+                && isNavigable(portCoordinates, overlayCoordinates);
     }
 
     private boolean isNavigableCatalogPortAccess(Coordinates portCoordinates, Coordinates connectorCoordinates, double distanceNm) {
-        if (isNavigable(portCoordinates, connectorCoordinates)) {
-            return true;
-        }
-
-        return distanceNm <= MAX_PORT_CATALOG_CONNECTOR_DISTANCE_NM && !landMask.isOnLand(connectorCoordinates);
+        return distanceNm <= MAX_PORT_CATALOG_CONNECTOR_DISTANCE_NM
+                && !landMask.isOnLand(portCoordinates) && !landMask.isOnLand(connectorCoordinates)
+                && isNavigable(portCoordinates, connectorCoordinates);
     }
 
     private double pathDistanceNm(List<Coordinates> geometry) {

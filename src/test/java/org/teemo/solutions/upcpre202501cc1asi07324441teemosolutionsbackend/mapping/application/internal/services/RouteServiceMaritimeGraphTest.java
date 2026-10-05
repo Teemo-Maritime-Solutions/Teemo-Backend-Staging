@@ -62,6 +62,8 @@ class RouteServiceMaritimeGraphTest {
         landMask = new MaritimeLandMask(geoUtils);
         MaritimeLandMask routingLandMask = new MaritimeLandMask(geoUtils) {
             @Override
+            public boolean isOnLand(Coordinates point) { return false; } // Synthetic topology fixture, not coastal evidence.
+            @Override
             public boolean crossesLand(List<Coordinates> path) {
                 return false;
             }

@@ -1,0 +1,6 @@
+{
+  "notice": "SYNTHETIC FIXTURE ONLY. Not real ports, coastlines or voyages.",
+  "points": [[-2, 0], [0, 1], [0, -1], [2, 0], [0, 6]],
+  "directedEdges": [[0, 1], [1, 3], [0, 2], [2, 3], [0, 4], [4, 3]],
+  "land": {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[-0.01,-0.01],[0.01,-0.01],[0.01,0.01],[-0.01,0.01],[-0.01,-0.01]]]}}]}
+}

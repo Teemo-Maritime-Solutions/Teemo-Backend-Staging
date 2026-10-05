@@ -78,19 +78,21 @@ class MaritimeNetworkCatalogIntegrityTest {
     }
 
     @Test
-    void shouldKeepAllManualSeaAndStraitWaypointsOutsideCoveredLandMaskPolygons() {
+    void shouldQuarantineManualWaypointsThatTheStricterMaskRejects() {
         MaritimeNetworkCatalog catalog = new MaritimeNetworkCatalog();
         MaritimeLandMask landMask = new MaritimeLandMask(new GeoUtils());
 
         List<String> invalidNodes = catalog.coreNodes().stream()
                 .filter(node -> node.getType() == MaritimeNodeType.SEA_WAYPOINT || node.getType() == MaritimeNodeType.STRAIT)
                 .filter(node -> landMask.isOnLand(node.getCoordinates()))
-                .map(node -> node.getId() + "@" + format(node.getCoordinates()))
+                .map(MaritimeNode::getId)
                 .toList();
 
+        // Negative controls from the legacy catalogue: do not move their coordinates to make a test pass.
         assertThat(invalidNodes)
-                .describedAs("Nodos manuales maritimos sobre tierra: %s", invalidNodes)
-                .isEmpty();
+                .contains("VIETNAM_COAST", "PANAMA_COASTAL_APPROACH");
+        RouteGraph graph = buildCatalogBackboneGraph(new GeoUtils(), landMask);
+        invalidNodes.forEach(id -> assertThat(graph.findNode(id)).as(id).isEmpty());
     }
 
     @Test
@@ -107,7 +109,6 @@ class MaritimeNetworkCatalogIntegrityTest {
 
         Set<String> invalidEdges = graph.getAllNodes().stream()
                 .flatMap(node -> graph.getAdjacentEdges(node).stream())
-                .filter(edge -> !edge.canal())
                 .filter(edge -> landMask.crossesLand(edge.geometry()))
                 .map(edge -> edge.fromNode().getId() + "->" + edge.toNode().getId())
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
@@ -121,27 +122,28 @@ class MaritimeNetworkCatalogIntegrityTest {
     }
 
     @Test
-    void shouldKeepNonCanalCoreEdgesOutsideCoveredLandMaskPolygons() {
+    void shouldRejectRawCatalogEdgesThatCrossLandIncludingCanals() {
         MaritimeNetworkCatalog catalog = new MaritimeNetworkCatalog();
         MaritimeLandMask landMask = new MaritimeLandMask(new GeoUtils());
+        RouteGraph graph = buildCatalogBackboneGraph(new GeoUtils(), landMask);
 
         for (MaritimeNetworkCatalog.EdgeDefinition edge : catalog.coreEdges()) {
             if (!ACTIVE_CORRIDOR_NODES.contains(edge.fromNodeId()) || !ACTIVE_CORRIDOR_NODES.contains(edge.toNodeId())) {
                 continue;
             }
-            if (edge.canal()) {
-                continue;
-            }
-
             MaritimeNode fromNode = catalog.findNode(edge.fromNodeId()).orElseThrow();
             MaritimeNode toNode = catalog.findNode(edge.toNodeId()).orElseThrow();
             java.util.List<Coordinates> geometry = edge.geometry().isEmpty()
                     ? java.util.List.of(fromNode.getCoordinates(), toNode.getCoordinates())
                     : edge.geometry();
 
-            assertThat(landMask.crossesLand(geometry))
-                    .as(edge.fromNodeId() + "->" + edge.toNodeId())
-                    .isFalse();
+            if (landMask.crossesLand(geometry)) {
+                assertThat(graph.findEdge(fromNode, toNode))
+                        .as("Rejected legacy geometry: " + edge.fromNodeId() + "->" + edge.toNodeId()).isEmpty();
+            } else {
+                assertThat(graph.findEdge(fromNode, toNode))
+                        .as("Unblocked legacy geometry: " + edge.fromNodeId() + "->" + edge.toNodeId()).isPresent();
+            }
         }
     }
 

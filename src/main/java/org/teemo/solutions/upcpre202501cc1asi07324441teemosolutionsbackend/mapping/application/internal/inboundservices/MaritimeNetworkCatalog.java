@@ -13,6 +13,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+/** Unverified legacy catalogue retained for migration/regression only; disabled in production configuration. */
+@Deprecated
 @Component
 public class MaritimeNetworkCatalog {
 

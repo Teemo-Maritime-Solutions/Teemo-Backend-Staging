@@ -2,246 +2,129 @@ package org.teemo.solutions.upcpre202501cc1asi07324441teemosolutionsbackend.mapp
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.locationtech.jts.geom.*;
+import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
+import org.locationtech.jts.index.strtree.STRtree;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
-import java.util.ArrayList;
 import java.util.List;
 
+/** Legacy coarse mask only. V2 uses a versioned offline artifact with independent validation. */
 @Component
 public class MaritimeLandMask {
-    private static final Logger logger = LoggerFactory.getLogger(MaritimeLandMask.class);
-    private static final String NATURAL_EARTH_LAND_RESOURCE = "data/ne_10m_land.geojson";
-    private static final double SAMPLE_SPACING_NM = 8.0;
-
+    private static final String RESOURCE = "data/ne_10m_land.geojson";
+    private final GeometryFactory factory = new GeometryFactory();
+    private final STRtree index = new STRtree();
     private final GeoUtils geoUtils;
-    private final List<LandPolygon> landPolygons;
+    @Value("${routing.maritime.land.sample-spacing-nm:0.5}")
+    private double sampleSpacingNm = 0.5;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public MaritimeLandMask(GeoUtils geoUtils) {
         this.geoUtils = geoUtils;
-        this.landPolygons = loadLandPolygons();
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(RESOURCE)) {
+            if (input == null) throw new IllegalStateException("Land data unavailable: " + RESOURCE);
+            load(new ObjectMapper().readTree(input));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Land data invalid/unavailable; no synthetic fallback", exception);
+        }
     }
 
-    public boolean isOnLand(Coordinates coordinates) {
-        return landPolygons.stream().anyMatch(polygon -> polygon.contains(coordinates));
+    /** Explicit source injection for synthetic geometry tests, never a production fallback. */
+    public MaritimeLandMask(GeoUtils geoUtils, JsonNode geoJson) {
+        this.geoUtils = geoUtils;
+        load(geoJson);
+    }
+
+    private void load(JsonNode root) {
+        JsonNode features = root.path("features");
+        if (!features.isArray() || features.isEmpty()) throw new IllegalArgumentException("Empty land dataset");
+        for (JsonNode feature : features) {
+            JsonNode geometry = feature.path("geometry");
+            switch (geometry.path("type").asText()) {
+                case "Polygon" -> addPolygon(geometry.path("coordinates"));
+                case "MultiPolygon" -> geometry.path("coordinates").forEach(this::addPolygon);
+                default -> throw new IllegalArgumentException("Unsupported land geometry");
+            }
+        }
+        index.build();
+    }
+
+    private void addPolygon(JsonNode rings) {
+        if (rings.isEmpty()) throw new IllegalArgumentException("Empty polygon");
+        LinearRing shell = ring(rings.get(0));
+        LinearRing[] holes = new LinearRing[rings.size() - 1];
+        for (int i = 1; i < rings.size(); i++) holes[i - 1] = ring(rings.get(i));
+        Polygon polygon = factory.createPolygon(shell, holes);
+        if (!polygon.isValid()) throw new IllegalArgumentException("Invalid land polygon");
+        index.insert(polygon.getEnvelopeInternal(), PreparedGeometryFactory.prepare(polygon));
+    }
+
+    private LinearRing ring(JsonNode points) {
+        Coordinate[] ring = new Coordinate[points.size()];
+        for (int i = 0; i < points.size(); i++) {
+            if (!points.get(i).isArray() || points.get(i).size() < 2
+                    || !points.get(i).get(0).isNumber() || !points.get(i).get(1).isNumber())
+                throw new IllegalArgumentException("Invalid land coordinate");
+            double lon = points.get(i).get(0).asDouble(), lat = points.get(i).get(1).asDouble();
+            check(new Coordinates(lat, lon));
+            ring[i] = new Coordinate(lon, lat);
+        }
+        return factory.createLinearRing(ring);
+    }
+
+    public boolean isOnLand(Coordinates point) {
+        check(point);
+        return intersects(factory.createPoint(new Coordinate(point.longitude(), point.latitude())));
+    }
+
+    private boolean intersects(Geometry geometry) {
+        for (Object candidate : index.query(geometry.getEnvelopeInternal())) {
+            if (((PreparedGeometry) candidate).intersects(geometry)) return true;
+        }
+        return false;
     }
 
     public boolean crossesLand(Coordinates start, Coordinates end) {
-        List<Coordinates> samples = geoUtils.densifyPath(List.of(start, end), SAMPLE_SPACING_NM);
-        for (int index = 1; index < samples.size() - 1; index++) {
-            if (isOnLand(samples.get(index))) {
-                return true;
+        check(start);
+        check(end);
+        if (!Double.isFinite(sampleSpacingNm) || sampleSpacingNm <= 0 || sampleSpacingNm > 8)
+            throw new IllegalStateException("land.sample-spacing-nm must be in (0, 8]");
+        if (isOnLand(start) || isOnLand(end)) return true;
+        List<Coordinates> samples = geoUtils.densifyPath(List.of(start, end), sampleSpacingNm);
+        for (int i = 1; i < samples.size(); i++) {
+            Coordinates a = samples.get(i - 1), b = samples.get(i);
+            double x1 = a.longitude(), x2 = b.longitude();
+            if (Math.abs(x2 - x1) <= 180) {
+                if (segment(x1, a.latitude(), x2, b.latitude())) return true;
+            } else {
+                double adjusted = x2 + (x2 < x1 ? 360 : -360);
+                double seam = x1 >= 0 ? 180 : -180;
+                double latitude = a.latitude() + (b.latitude() - a.latitude()) * (seam - x1) / (adjusted - x1);
+                if (segment(x1, a.latitude(), seam, latitude)
+                        || segment(-seam, latitude, x2, b.latitude())) return true;
             }
         }
         return false;
+    }
+
+    private boolean segment(double x1, double y1, double x2, double y2) {
+        return intersects(factory.createLineString(new Coordinate[]{new Coordinate(x1, y1), new Coordinate(x2, y2)}));
     }
 
     public boolean crossesLand(List<Coordinates> path) {
-        if (path == null || path.size() < 2) {
-            return false;
-        }
-        for (int index = 0; index < path.size() - 1; index++) {
-            if (crossesLand(path.get(index), path.get(index + 1))) {
-                return true;
-            }
-        }
+        if (path == null || path.isEmpty()) throw new IllegalArgumentException("Missing path geometry");
+        if (path.size() == 1) return isOnLand(path.get(0));
+        for (int i = 1; i < path.size(); i++) if (crossesLand(path.get(i - 1), path.get(i))) return true;
         return false;
     }
 
-    private List<LandPolygon> loadLandPolygons() {
-        try (InputStream inputStream = Thread.currentThread().getContextClassLoader()
-                .getResourceAsStream(NATURAL_EARTH_LAND_RESOURCE)) {
-            if (inputStream == null) {
-                logger.warn("land.mask.resource.missing resource={}", NATURAL_EARTH_LAND_RESOURCE);
-                return fallbackLandPolygons();
-            }
-
-            ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode root = objectMapper.readTree(inputStream);
-            JsonNode features = root.path("features");
-            if (!features.isArray() || features.isEmpty()) {
-                logger.warn("land.mask.resource.empty resource={}", NATURAL_EARTH_LAND_RESOURCE);
-                return fallbackLandPolygons();
-            }
-
-            List<LandPolygon> polygons = new ArrayList<>();
-            for (JsonNode feature : features) {
-                JsonNode geometry = feature.path("geometry");
-                parseGeometry(polygons, geometry);
-            }
-            if (polygons.isEmpty()) {
-                logger.warn("land.mask.resource.no-polygons resource={}", NATURAL_EARTH_LAND_RESOURCE);
-                return fallbackLandPolygons();
-            }
-            logger.info("land.mask.loaded resource={} polygons={}", NATURAL_EARTH_LAND_RESOURCE, polygons.size());
-            return List.copyOf(polygons);
-        } catch (Exception exception) {
-            logger.warn("land.mask.resource.failed resource={} message={}", NATURAL_EARTH_LAND_RESOURCE, exception.getMessage());
-            return fallbackLandPolygons();
-        }
-    }
-
-    private void parseGeometry(List<LandPolygon> polygons, JsonNode geometry) {
-        String type = geometry.path("type").asText("");
-        JsonNode coordinates = geometry.path("coordinates");
-        if ("Polygon".equalsIgnoreCase(type)) {
-            addPolygon(polygons, coordinates);
-            return;
-        }
-        if ("MultiPolygon".equalsIgnoreCase(type) && coordinates.isArray()) {
-            for (JsonNode polygonCoordinates : coordinates) {
-                addPolygon(polygons, polygonCoordinates);
-            }
-        }
-    }
-
-    private void addPolygon(List<LandPolygon> polygons, JsonNode polygonCoordinates) {
-        if (!polygonCoordinates.isArray() || polygonCoordinates.isEmpty()) {
-            return;
-        }
-
-        JsonNode outerRing = polygonCoordinates.get(0);
-        List<Coordinates> points = new ArrayList<>();
-        if (outerRing == null || !outerRing.isArray()) {
-            return;
-        }
-        for (JsonNode point : outerRing) {
-            if (point.isArray() && point.size() >= 2) {
-                points.add(new Coordinates(point.get(1).asDouble(), point.get(0).asDouble()));
-            }
-        }
-        if (points.size() >= 4) {
-            polygons.add(new LandPolygon(points));
-        }
-    }
-
-    private List<LandPolygon> fallbackLandPolygons() {
-        return List.of(
-                polygon(
-                        22.0, 28.0,
-                        22.0, 35.5,
-                        32.6, 35.5,
-                        32.6, 28.0
-                ),
-                polygon(
-                        12.0, 34.0,
-                        12.0, 44.0,
-                        15.0, 51.0,
-                        22.0, 57.5,
-                        30.5, 56.0,
-                        31.8, 44.0,
-                        29.5, 36.0
-                ),
-                polygon(
-                        7.0, 68.0,
-                        7.0, 77.0,
-                        10.0, 87.0,
-                        22.0, 91.0,
-                        29.5, 86.0,
-                        31.5, 76.0,
-                        24.0, 70.0
-                ),
-                polygon(
-                        1.0, 97.0,
-                        1.0, 105.5,
-                        8.0, 109.0,
-                        21.5, 108.5,
-                        23.0, 101.0,
-                        15.0, 97.0
-                ),
-                polygon(
-                        8.8, -92.5,
-                        8.6, -91.0,
-                        8.2, -89.0,
-                        8.1, -87.0,
-                        8.2, -85.0,
-                        8.5, -83.5,
-                        8.8, -82.0,
-                        8.9, -80.7,
-                        8.9, -79.5,
-                        9.2, -77.8,
-                        9.5, -79.0,
-                        9.6, -80.3,
-                        10.0, -81.5,
-                        11.5, -82.6,
-                        13.3, -83.6,
-                        14.5, -84.6,
-                        15.2, -85.8,
-                        15.8, -87.2,
-                        16.0, -88.8,
-                        15.8, -90.4,
-                        15.0, -91.8,
-                        12.0, -92.5
-                ),
-                polygon(
-                        30.0, 26.0,
-                        30.0, 39.5,
-                        37.5, 43.0,
-                        41.5, 38.0,
-                        41.5, 29.0,
-                        37.0, 26.0
-                )
-        );
-    }
-
-    private LandPolygon polygon(double... latLonPairs) {
-        ArrayList<Coordinates> points = new ArrayList<>();
-        for (int index = 0; index < latLonPairs.length; index += 2) {
-            points.add(new Coordinates(latLonPairs[index], latLonPairs[index + 1]));
-        }
-        return new LandPolygon(points);
-    }
-
-    private static final class LandPolygon {
-        private final List<Coordinates> points;
-        private final double minLatitude;
-        private final double maxLatitude;
-        private final double minLongitude;
-        private final double maxLongitude;
-
-        private LandPolygon(List<Coordinates> points) {
-            this.points = List.copyOf(points);
-            double minLat = Double.POSITIVE_INFINITY;
-            double maxLat = Double.NEGATIVE_INFINITY;
-            double minLon = Double.POSITIVE_INFINITY;
-            double maxLon = Double.NEGATIVE_INFINITY;
-            for (Coordinates point : points) {
-                minLat = Math.min(minLat, point.latitude());
-                maxLat = Math.max(maxLat, point.latitude());
-                minLon = Math.min(minLon, point.longitude());
-                maxLon = Math.max(maxLon, point.longitude());
-            }
-            this.minLatitude = minLat;
-            this.maxLatitude = maxLat;
-            this.minLongitude = minLon;
-            this.maxLongitude = maxLon;
-        }
-
-        private boolean contains(Coordinates candidate) {
-            if (candidate.latitude() < minLatitude || candidate.latitude() > maxLatitude
-                    || candidate.longitude() < minLongitude || candidate.longitude() > maxLongitude) {
-                return false;
-            }
-
-            boolean inside = false;
-            double x = candidate.longitude();
-            double y = candidate.latitude();
-
-            for (int i = 0, j = points.size() - 1; i < points.size(); j = i++) {
-                double xi = points.get(i).longitude();
-                double yi = points.get(i).latitude();
-                double xj = points.get(j).longitude();
-                double yj = points.get(j).latitude();
-
-                boolean intersects = ((yi > y) != (yj > y))
-                        && (x < ((xj - xi) * (y - yi) / ((yj - yi) + 1.0e-12)) + xi);
-                if (intersects) {
-                    inside = !inside;
-                }
-            }
-            return inside;
-        }
+    private void check(Coordinates p) {
+        if (p == null || !Double.isFinite(p.latitude()) || !Double.isFinite(p.longitude())
+                || Math.abs(p.latitude()) > 90 || Math.abs(p.longitude()) > 180)
+            throw new IllegalArgumentException("Invalid WGS84 coordinates");
     }
 }

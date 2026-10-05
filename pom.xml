@@ -31,6 +31,16 @@
 		 </properties>
 		 <dependencies>
 			 <dependency>
+				 <groupId>net.sf.geographiclib</groupId>
+				 <artifactId>GeographicLib-Java</artifactId>
+				 <version>2.1</version>
+			 </dependency>
+			 <dependency>
+				 <groupId>org.locationtech.jts</groupId>
+				 <artifactId>jts-core</artifactId>
+				 <version>1.20.0</version>
+			 </dependency>
+			 <dependency>
 				 <groupId>com.microsoft.onnxruntime</groupId>
 				 <artifactId>onnxruntime</artifactId>
 				 <version>1.18.0</version>

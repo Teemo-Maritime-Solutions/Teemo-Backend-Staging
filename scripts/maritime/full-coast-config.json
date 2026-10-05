@@ -1,0 +1,14 @@
+{
+  "base_resolution": 2,
+  "coastal_resolution": 3,
+  "port_resolution": 5,
+  "shoreline_resolution": "f",
+  "geodesic_step_m": 500,
+  "geometry_tolerance_deg": 0.00001,
+  "coastal_buffer_m": 0,
+  "max_port_connector_m": 20000,
+  "port_candidates": 24,
+  "port_connections": 3,
+  "max_nodes": 500000,
+  "invalid_geometry_policy": "BLOCK_ENVELOPE"
+}

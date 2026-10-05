@@ -27,6 +27,7 @@ public class GeoUtils {
         double a = Math.pow(Math.sin(dLat / 2), 2)
                 + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin(dLon / 2), 2);
 
+        a = Math.max(0.0, Math.min(1.0, a));
         return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
@@ -60,8 +61,17 @@ public class GeoUtils {
     }
 
     private Coordinates interpolate(Coordinates from, Coordinates to, double ratio) {
-        double latitude = from.latitude() + (to.latitude() - from.latitude()) * ratio;
-        double longitude = from.longitude() + (to.longitude() - from.longitude()) * ratio;
-        return new Coordinates(latitude, longitude);
+        if (ratio == 1) return to;
+        double lat1 = Math.toRadians(from.latitude()), lon1 = Math.toRadians(from.longitude());
+        double lat2 = Math.toRadians(to.latitude()), lon2 = Math.toRadians(to.longitude());
+        double angle = calculateHaversineDistance(from, to) / EARTH_RADIUS_KM;
+        if (angle < 1e-12) return from;
+        if (Math.PI - angle < 1e-9) throw new IllegalArgumentException("Ambiguous antipodal segment");
+        double a = Math.sin((1 - ratio) * angle) / Math.sin(angle);
+        double b = Math.sin(ratio * angle) / Math.sin(angle);
+        double x = a * Math.cos(lat1) * Math.cos(lon1) + b * Math.cos(lat2) * Math.cos(lon2);
+        double y = a * Math.cos(lat1) * Math.sin(lon1) + b * Math.cos(lat2) * Math.sin(lon2);
+        double z = a * Math.sin(lat1) + b * Math.sin(lat2);
+        return new Coordinates(Math.toDegrees(Math.atan2(z, Math.hypot(x, y))), Math.toDegrees(Math.atan2(y, x)));
     }
 }

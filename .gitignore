@@ -1,6 +1,12 @@
 /target/
 /cache/
 /node_modules/
+/tmp/
+/data/maritime-routing/
+/.venv-maritime/
+/.venv-weather/
+**/__pycache__/
+/hs_err_pid*.log
 /.idea/compiler.xml
 /.idea/discord.xml
 /.idea/encodings.xml
@@ -13,3 +19,5 @@
 .idea/copilot.data.migration.ask2agent.xml
 .idea/copilot.data.migration.edit.xml
 .idea/workspace.xml
+
+/config/maritime-local.properties

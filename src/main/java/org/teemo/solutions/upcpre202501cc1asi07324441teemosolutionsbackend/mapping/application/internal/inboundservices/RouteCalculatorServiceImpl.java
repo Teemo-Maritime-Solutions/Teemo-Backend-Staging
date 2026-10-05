@@ -93,7 +93,9 @@ public class RouteCalculatorServiceImpl implements RouteCalculatorService {
         for (int index = 0; index < orderedNodes.size() - 1; index++) {
             MaritimeNode fromNode = orderedNodes.get(index);
             MaritimeNode toNode = orderedNodes.get(index + 1);
-            MaritimeEdge edge = graph.findEdge(fromNode, toNode).orElseGet(() -> syntheticEdge(fromNode, toNode));
+            MaritimeEdge edge = graph.findEdge(fromNode, toNode).orElseThrow(() ->
+                    new RouteNotFoundException("Grafo inconsistente: falta una arista validada entre "
+                            + fromNode.getId() + " y " + toNode.getId()));
             totalDistanceNm += edge.distanceNm();
             estimatedHours += edge.estimatedHours();
             appendGeometry(geometry, edge.geometry());
@@ -107,21 +109,6 @@ public class RouteCalculatorServiceImpl implements RouteCalculatorService {
                 totalDistanceNm,
                 estimatedHours,
                 List.of()
-        );
-    }
-
-    private MaritimeEdge syntheticEdge(MaritimeNode fromNode, MaritimeNode toNode) {
-        double distanceNm = geoUtils.calculateHaversineDistanceNm(fromNode.getCoordinates(), toNode.getCoordinates());
-        return new MaritimeEdge(
-                fromNode,
-                toNode,
-                distanceNm,
-                distanceNm / 18.0,
-                false,
-                false,
-                false,
-                false,
-                List.of(fromNode.getCoordinates(), toNode.getCoordinates())
         );
     }
 
